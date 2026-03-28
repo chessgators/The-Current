@@ -1,0 +1,1573 @@
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Ship, Search, MapPin, ShieldAlert, Anchor, X, Waves, Wind, Thermometer, Activity, TrendingUp, TrendingDown, AlertCircle, Info } from 'lucide-react';
+
+// ─── Stat explanations ────────────────────────────────────────────────────────
+const STAT_EXPLAIN = {
+  en: {
+    surfaceTemp:  { why:'Why it matters', body:'Warmer ocean surface temps indicate El Niño or La Niña patterns that directly affect agricultural yields in South America, Australia, and Southeast Asia — altering commodity supply chains and disrupting fishing grounds.' },
+    waveHeight:   { why:'Why it matters', body:'High significant wave height delays or halts cargo ship operations. Container ships reduce speed or divert when swells exceed 4m, raising fuel costs and transit days — pushing up freight rates for every commodity on that route.' },
+    climateDelta: { why:'Why it matters', body:'The SST anomaly (vs the 1985–2012 baseline) is the key El Niño/La Niña indicator. A positive anomaly above +0.5°C signals warming that disrupts monsoons, droughts, and storms globally — affecting grain, cocoa, and coffee harvests.' },
+    windSpeed:    { why:'Why it matters', body:'Strong surface winds generate wave height and affect ship routing. Persistent high winds in corridors like the North Atlantic or Indian Ocean force vessels onto longer, costlier paths, compounding delays for agricultural and energy cargoes.' },
+  },
+  es: {
+    surfaceTemp:  { why:'Por qué importa', body:'Las temperaturas superficiales más cálidas indican patrones de El Niño o La Niña que afectan directamente los rendimientos agrícolas en Sudamérica, Australia y el Sudeste Asiático, alterando las cadenas de suministro de materias primas.' },
+    waveHeight:   { why:'Por qué importa', body:'Una altura de ola alta retrasa o detiene las operaciones de buques de carga. Los portacontenedores reducen velocidad o desvían rutas cuando el oleaje supera los 4 m, aumentando costes de combustible y días de tránsito.' },
+    climateDelta: { why:'Por qué importa', body:'La anomalía de la TSM es el indicador clave de El Niño/La Niña. Una anomalía positiva superior a +0,5 °C señala calentamiento que altera monzones, sequías y tormentas, con efectos en cascada sobre cereales, cacao y café.' },
+    windSpeed:    { why:'Por qué importa', body:'Los vientos fuertes generan oleaje y afectan el enrutamiento. Los vientos altos persistentes en el Atlántico Norte o el Océano Índico obligan a los buques a rutas más largas y costosas, agravando los retrasos en cargas agrícolas y energéticas.' },
+  },
+  zh: {
+    surfaceTemp:  { why:'为何重要', body:'海面温度升高预示厄尔尼诺或拉尼娜模式，直接影响南美洲、澳大利亚和东南亚的农业产量，从而改变大宗商品供应链并破坏渔场。' },
+    waveHeight:   { why:'为何重要', body:'有效波高过高会延误或中断货船作业。当浪涌超过4米时，集装箱船降速或改道，导致燃油成本上升、在途天数增加，进而推高该航线所有商品的运费。' },
+    climateDelta: { why:'为何重要', body:'海面温度异常是厄尔尼诺/拉尼娜的关键指标。正异常超过+0.5°C意味着全球季风、干旱和风暴格局受扰，对谷物、可可和咖啡收成产生连锁影响。' },
+    windSpeed:    { why:'为何重要', body:'强劲的海面风产生波浪并影响船舶航线规划。北大西洋或印度洋持续的强风可能迫使船舶绕行更长、更昂贵的航线，加剧农产品和能源货物的延误。' },
+  },
+};
+
+// ─── Fishing game data ────────────────────────────────────────────────────────
+const FISH_ITEMS = [
+  { id:'sugar',    name:'Raw Sugar',       icon:'🍬', unit:'lb',     basePrice:0.195,  rarity:'common',   routes:['Atlantic','Gulf of Mexico'],         supplyRoute:'Brazilian sugar ships through Atlantic lanes to US refiners. Caribbean supply is sensitive to Gulf weather.',                                context:'US refined sugar prices remain above norms due to import quota pressures.' },
+  { id:'rubber',   name:'Natural Rubber',  icon:'⭕', unit:'lb',     basePrice:0.69,   rarity:'common',   routes:['Indian Ocean','Equatorial Pacific'],  supplyRoute:'Thai and Indonesian rubber crosses Indian Ocean and Pacific. Asian shipping disruptions cause near-immediate US price spikes.',              context:'Natural rubber prices are firming as Southeast Asian production faces weather constraints.' },
+  { id:'cotton',   name:'Cotton',          icon:'🧵', unit:'lb',     basePrice:0.76,   rarity:'common',   routes:['Indian Ocean','Atlantic'],            supplyRoute:'Disruptions from India via Indian Ocean affect US textile mills sourcing specialty yarns.',                                                     context:'US cotton prices are pressured by strong domestic production and soft global apparel demand.' },
+  { id:'corn',     name:'Corn',            icon:'🌽', unit:'bushel', basePrice:4.62,   rarity:'common',   routes:['Gulf of Mexico','Atlantic'],          supplyRoute:'Corn is primarily domestic, but Gulf of Mexico shipping lanes affect global benchmark prices.',                                               context:'US corn prices are subdued in early 2026 due to large stockpiles and ethanol demand.' },
+  { id:'barley',   name:'Barley',          icon:'🌿', unit:'bushel', basePrice:4.18,   rarity:'common',   routes:['Black Sea','North Atlantic'],         supplyRoute:'Australian and European barley transits Indian Ocean and Atlantic routes to US craft brewers and feed producers.',                          context:'US barley prices remain stable with steady domestic malt demand.' },
+  { id:'wheat',    name:'Wheat',           icon:'🌾', unit:'bushel', basePrice:5.42,   rarity:'common',   routes:['Black Sea','Pacific North'],          supplyRoute:'Black Sea and Pacific routes supply ~35% of US imports; disruptions raise flour and bread costs.',                                          context:'US wheat futures softened in early 2026 amid large domestic harvests.' },
+  { id:'coffee',   name:'Arabica Coffee',  icon:'☕', unit:'lb',     basePrice:4.82,   rarity:'common',   routes:['Atlantic','Gulf of Mexico'],          supplyRoute:'Brazilian and Colombian beans transit Atlantic corridors; Red Sea disruptions add 8–12 days to East Coast roasters.',                       context:'Arabica futures are near 10-year highs as US retail coffee prices rise sharply.' },
+  { id:'fuel',     name:'Marine Gas Oil',  icon:'⛽', unit:'gallon', basePrice:3.08,   rarity:'common',   routes:['Gulf of Mexico','Indian Ocean'],      supplyRoute:'Gulf of Mexico refineries supply most US marine fuel; Red Sea disruptions push MGO prices up at all US ports.',                           context:'MGO prices have risen ~15% since mid-2025, reflecting crude and route-related demand.' },
+  { id:'avocado',  name:'Avocados',        icon:'🥑', unit:'lb',     basePrice:1.55,   rarity:'common',   routes:['Equatorial Pacific','Gulf of Mexico'],supplyRoute:'Mexican avocados cross the US border; Peruvian imports transit Pacific lanes, shifting buyers to pricier Mexican supply.',                context:'US avocado prices are elevated after California drought reduced domestic output.' },
+  { id:'soybeans', name:'Soybeans',        icon:'🫘', unit:'bushel', basePrice:9.88,   rarity:'uncommon', routes:['Atlantic','Pacific North'],           supplyRoute:'Brazilian soybeans compete with US exports on Pacific and Atlantic routes; disruptions tighten domestic supply.',                           context:'US soybean prices are moderately stable with strong domestic production.' },
+  { id:'rice',     name:'Rice',            icon:'🍚', unit:'cwt',    basePrice:15.20,  rarity:'uncommon', routes:['Indian Ocean','Equatorial Pacific'],  supplyRoute:'Southeast Asian rice crosses Indian Ocean and Pacific; disruptions directly impact US import prices from Vietnam and Thailand.',            context:'US rice import prices have risen following Indian export restrictions in late 2025.' },
+  { id:'lng',      name:'LNG',             icon:'🔥', unit:'MMBtu',  basePrice:3.65,   rarity:'uncommon', routes:['Atlantic','Pacific North'],           supplyRoute:'US LNG exports transit Atlantic and Pacific; European demand from Red Sea rerouting reduces tanker availability.',                          context:'US LNG export prices are moderately elevated as European buyers prioritize US supply.' },
+  { id:'cocoa',    name:'Cocoa',           icon:'🍫', unit:'lb',     basePrice:4.10,   rarity:'uncommon', routes:['Atlantic'],                           supplyRoute:'West African cocoa (60% of global supply) transits the Atlantic to East Coast chocolate manufacturers.',                                     context:'Cocoa prices remain elevated following two consecutive years of poor West African harvests.' },
+  { id:'lithium',  name:'Lithium',         icon:'⚡', unit:'kg',     basePrice:11.20,  rarity:'uncommon', routes:['Pacific North'],                      supplyRoute:'Chilean and Australian lithium ships through Pacific lanes; disruptions sharply tighten US battery supply chains.',                          context:'Lithium prices partially recovered from a 2024–2025 glut, supported by renewed US EV incentives.' },
+  { id:'aluminum', name:'Aluminum',        icon:'🥈', unit:'lb',     basePrice:1.12,   rarity:'uncommon', routes:['Indian Ocean','Pacific North'],       supplyRoute:'Middle Eastern and Australian aluminum ships through Indian Ocean and Pacific; Red Sea instability raises freight premiums.',                context:'US aluminum prices reflect domestic tariff protection, though global disruptions affect spot pricing.' },
+  { id:'copper',   name:'Copper',          icon:'🔶', unit:'lb',     basePrice:4.48,   rarity:'uncommon', routes:['Pacific North','Gulf of Mexico'],     supplyRoute:'Chilean copper ships through the Panama Canal; any canal restriction immediately tightens US manufacturing supply chains.',                  context:'Copper is near multi-year highs driven by AI data center and EV infrastructure demand.' },
+  { id:'crude',    name:'Crude Oil (WTI)', icon:'🛢️', unit:'barrel', basePrice:76.20,  rarity:'rare',     routes:['Gulf of Mexico','Indian Ocean','Red Sea Corridor'], supplyRoute:'US crude is largely domestic but global benchmark pricing is sensitive to Strait of Hormuz and Red Sea instability.', context:'WTI crude trades near $76/barrel, supported by OPEC+ discipline and moderate global demand.' },
+  { id:'timber',   name:'Timber',          icon:'🌲', unit:'MBF',    basePrice:510.00, rarity:'rare',     routes:['Pacific North','North Atlantic'],     supplyRoute:'Canadian softwood enters via land; Southeast Asian hardwoods cross Pacific lanes, disruptions raise furniture costs.',                     context:'US lumber prices are moderately stable, above 2023 lows but far below the 2021 pandemic peak.' },
+  { id:'chips',    name:'Semiconductors',  icon:'💻', unit:'unit',   basePrice:115.00, rarity:'rare',     routes:['Equatorial Pacific','Pacific North'], supplyRoute:'Taiwan and South Korean chips cross the Pacific; any disruption causes immediate supply shortfalls for US electronics.',                   context:'Advanced semiconductor prices remain elevated as AI chip demand outpaces fab capacity.' },
+  { id:'steel',    name:'Steel (HRC)',     icon:'⚙️', unit:'ton',    basePrice:780.00, rarity:'epic',     routes:['Atlantic','Pacific North'],           supplyRoute:'Imported coil from Brazil and South Korea benchmarks domestic US prices; freight disruptions tighten supply for US mills.',               context:'US hot-rolled coil prices are stable with Section 232 tariffs maintaining domestic price floors.' },
+];
+
+const RARITY = {
+  common:   { label:'Common',   weight:55, glow:null,                                 color:'#a8ccd8', border:'rgba(168,204,216,0.3)' },
+  uncommon: { label:'Uncommon', weight:28, glow:'0 0 18px 4px rgba(34,197,94,0.55)', color:'#22c55e', border:'rgba(34,197,94,0.5)' },
+  rare:     { label:'Rare',     weight:13, glow:'0 0 22px 5px rgba(59,130,246,0.65)',color:'#3b82f6', border:'rgba(59,130,246,0.55)' },
+  epic:     { label:'Epic',     weight:4,  glow:'0 0 26px 7px rgba(139,92,246,0.70)',color:'#8b5cf6', border:'rgba(139,92,246,0.6)' },
+};
+
+function pickItem() {
+  const pool = [];
+  FISH_ITEMS.forEach(item => { for (let i = 0; i < RARITY[item.rarity].weight; i++) pool.push(item); });
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function fmtFishPrice(p, unit) {
+  const v = p < 1 ? '$'+p.toFixed(4) : p < 100 ? '$'+p.toFixed(2) : '$'+Math.round(p).toLocaleString();
+  return `${v} / ${unit}`;
+}
+
+// ─── Fishing game components ──────────────────────────────────────────────────
+
+function BoatScene({ phase, lineLen, splash }) {
+  return (
+    <svg viewBox="0 0 700 340" xmlns="http://www.w3.org/2000/svg" style={{ width:'100%', height:'100%', display:'block', userSelect:'none' }}>
+      <defs>
+        <linearGradient id="g-sky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#020d18"/><stop offset="100%" stopColor="#061c30"/>
+        </linearGradient>
+        <linearGradient id="g-sea" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#0a2d47"/><stop offset="100%" stopColor="#020d18"/>
+        </linearGradient>
+        <radialGradient id="g-moon" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#e8f4f8" stopOpacity="0.95"/>
+          <stop offset="100%" stopColor="#a8ccd8" stopOpacity="0.4"/>
+        </radialGradient>
+      </defs>
+
+      <rect width="700" height="340" fill="url(#g-sky)"/>
+
+      {/* Stars */}
+      {[[60,30],[120,18],[200,40],[280,12],[360,28],[450,16],[530,35],[600,20],[660,42],[80,55],[170,60],[320,48],[480,52],[620,58],[150,25],[400,18],[560,44]].map(([x,y],i)=>(
+        <circle key={i} cx={x} cy={y} r={i%3===0?1.5:0.9} fill="#e8f4f8" opacity={0.35+((i*7)%10)*0.04}/>
+      ))}
+
+      {/* Moon */}
+      <circle cx="590" cy="46" r="24" fill="url(#g-moon)"/>
+      <circle cx="599" cy="41" r="15" fill="#020d18" opacity="0.28"/>
+      {/* Moon glow */}
+      <ellipse cx="590" cy="46" rx="38" ry="38" fill="#a8ccd8" opacity="0.04"/>
+
+      {/* Moon reflection on water */}
+      <ellipse cx="570" cy="178" rx="28" ry="6" fill="#a8ccd8" opacity="0.07"/>
+
+      {/* Horizon glow */}
+      <ellipse cx="350" cy="173" rx="350" ry="14" fill="#0094b8" opacity="0.07"/>
+
+      {/* Sea */}
+      <rect x="0" y="172" width="700" height="168" fill="url(#g-sea)"/>
+
+      {/* Waves */}
+      {[178,187,197,209,223].map((y,i)=>(
+        <path key={y} d={`M0,${y} Q88,${y+(i%2===0?-5:5)} 175,${y} Q263,${y+(i%2===0?5:-5)} 350,${y} Q438,${y+(i%2===0?-5:5)} 525,${y} Q613,${y+(i%2===0?5:-5)} 700,${y}`}
+          stroke="#0094b8" strokeWidth="0.7" fill="none" opacity={0.17-i*0.02}/>
+      ))}
+
+      {/* Bioluminescent sparkles */}
+      {[90,170,255,375,468,562,638].map((x,i)=>(
+        <circle key={x} cx={x} cy={183+(i*3)%15} r={1.2+(i%2)*0.6} fill="#00d4ff" opacity={0.13+(i%3)*0.06}/>
+      ))}
+
+      {/* Boat hull */}
+      <path d="M215,190 L485,190 L465,217 L235,217 Z" fill="#1a3350" stroke="#00d4ff" strokeWidth="1" strokeOpacity="0.35"/>
+      {/* Deck */}
+      <rect x="230" y="184" width="240" height="11" rx="2" fill="#0a2d47" stroke="#0094b8" strokeWidth="0.8" strokeOpacity="0.45"/>
+      {/* Cabin */}
+      <rect x="290" y="158" width="88" height="30" rx="2" fill="#061c30" stroke="#0094b8" strokeWidth="0.8" strokeOpacity="0.5"/>
+      {/* Cabin windows */}
+      {[298,316,334,352].map((wx,i)=>(
+        <rect key={i} x={wx} y="163" width="14" height="11" rx="1" fill="#00d4ff" opacity="0.14"/>
+      ))}
+      {/* Mast */}
+      <line x1="350" y1="126" x2="350" y2="184" stroke="#a8ccd8" strokeWidth="2" strokeOpacity="0.55"/>
+      {/* Rigging */}
+      <line x1="285" y1="184" x2="350" y2="126" stroke="#6a9db0" strokeWidth="0.8" strokeOpacity="0.35"/>
+      <line x1="415" y1="184" x2="350" y2="126" stroke="#6a9db0" strokeWidth="0.8" strokeOpacity="0.35"/>
+      {/* Portholes */}
+      <circle cx="252" cy="202" r="7" fill="none" stroke="#00d4ff" strokeWidth="0.9" strokeOpacity="0.4"/>
+      <circle cx="252" cy="202" r="3.5" fill="#00d4ff" opacity="0.10"/>
+      <circle cx="448" cy="202" r="7" fill="none" stroke="#00d4ff" strokeWidth="0.9" strokeOpacity="0.4"/>
+      <circle cx="448" cy="202" r="3.5" fill="#00d4ff" opacity="0.10"/>
+      {/* Boat name lettering (The Current) */}
+      <text x="350" y="210" textAnchor="middle" fontFamily="monospace" fontSize="7" fill="#00d4ff" opacity="0.3" letterSpacing="3">THE CURRENT</text>
+
+      {/* Person legs */}
+      <line x1="420" y1="175" x2="416" y2="184" stroke="#c8a068" strokeWidth="2.5" strokeLinecap="round"/>
+      <line x1="420" y1="175" x2="424" y2="184" stroke="#c8a068" strokeWidth="2.5" strokeLinecap="round"/>
+      {/* Person torso */}
+      <line x1="420" y1="158" x2="420" y2="175" stroke="#1a5f8a" strokeWidth="4" strokeLinecap="round"/>
+      {/* Person head */}
+      <circle cx="420" cy="151" r="8.5" fill="#e8cdb8"/>
+      {/* Captain's hat brim */}
+      <ellipse cx="420" cy="145" rx="11" ry="3.5" fill="#1a3350" stroke="#00d4ff" strokeWidth="0.8" strokeOpacity="0.6"/>
+      {/* Hat top */}
+      <rect x="414" y="135" width="12" height="11" rx="1.5" fill="#1a3350"/>
+      {/* Hat band */}
+      <rect x="414" y="141" width="12" height="3" fill="#00d4ff" opacity="0.3"/>
+      {/* Arm holding rod */}
+      <line x1="420" y1="163" x2="450" y2="152" stroke="#e8cdb8" strokeWidth="3.5" strokeLinecap="round"/>
+      {/* Fishing rod */}
+      <line x1="450" y1="152" x2="528" y2="126" stroke="#c8a870" strokeWidth="2.2" strokeLinecap="round"/>
+      {/* Rod tip highlight */}
+      <circle cx="528" cy="126" r="2" fill="#c8a870" opacity="0.7"/>
+
+      {/* Fishing line */}
+      {phase !== 'idle' && lineLen > 0 && (
+        <line
+          x1="528" y1="127"
+          x2={528 + lineLen * 0.25} y2={127 + lineLen}
+          stroke="#a8ccd8" strokeWidth="0.9" strokeOpacity="0.65"
+          strokeDasharray={phase === 'reeling' ? '5 4' : 'none'}
+        />
+      )}
+
+      {/* Bobber */}
+      {phase === 'casting' && lineLen > 15 && (
+        <g transform={`translate(${528 + lineLen * 0.25}, ${127 + lineLen})`}>
+          <ellipse cx="0" cy="-2" rx="5.5" ry="3.5" fill="#ef4444" opacity="0.9"/>
+          <ellipse cx="0" cy="2"  rx="5.5" ry="3.5" fill="#e8f4f8" opacity="0.85"/>
+          <circle cx="0" cy="0" r="1.5" fill="#ef4444" opacity="0.6"/>
+        </g>
+      )}
+
+      {/* Splash */}
+      {splash && lineLen > 10 && (
+        <g transform={`translate(${528 + lineLen * 0.25}, ${127 + lineLen})`}>
+          {[-16,-9,0,9,16].map((ox,i)=>(
+            <line key={i} x1={ox} y1="0" x2={ox+(-8+i*4)} y2={-14-Math.abs(i-2)*5}
+              stroke="#00d4ff" strokeWidth="1.8" strokeOpacity="0.85" strokeLinecap="round"/>
+          ))}
+          <ellipse cx="0" cy="3" rx="20" ry="5" fill="none" stroke="#00d4ff" strokeWidth="1.2" strokeOpacity="0.45"/>
+          <ellipse cx="0" cy="3" rx="10" ry="2.5" fill="none" stroke="#00d4ff" strokeWidth="0.8" strokeOpacity="0.3"/>
+        </g>
+      )}
+
+      {/* Prompt text */}
+      {phase === 'idle' && (
+        <text x="350" y="268" textAnchor="middle" fontFamily="DM Mono, monospace" fontSize="11" fill="#00d4ff" opacity="0.5" letterSpacing="3">
+          CLICK ANYWHERE TO CAST
+        </text>
+      )}
+      {phase === 'casting' && (
+        <text x="350" y="268" textAnchor="middle" fontFamily="DM Mono, monospace" fontSize="11" fill="#00d4ff" opacity="0.5" letterSpacing="3">
+          CLICK TO REEL IN
+        </text>
+      )}
+      {phase === 'reeling' && (
+        <text x="350" y="268" textAnchor="middle" fontFamily="DM Mono, monospace" fontSize="11" fill="#22c55e" opacity="0.85" letterSpacing="3">
+          REELING IN…
+        </text>
+      )}
+    </svg>
+  );
+}
+
+function CatchCard({ item, onDismiss }) {
+  const r = RARITY[item.rarity];
+  const [vis, setVis] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setVis(true), 20); return () => clearTimeout(t); }, []);
+
+  return (
+    <div
+      onClick={onDismiss}
+      style={{
+        position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center',
+        background:'rgba(2,13,24,0.75)', zIndex:20, backdropFilter:'blur(5px)',
+        opacity: vis ? 1 : 0, transition:'opacity 0.25s ease',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background:'linear-gradient(160deg,#061c30 0%,#020d18 100%)',
+          border:`1px solid ${r.border}`,
+          boxShadow: r.glow ? r.glow+', 0 24px 60px rgba(0,0,0,0.85)' : '0 24px 60px rgba(0,0,0,0.85)',
+          width:310, maxWidth:'92vw',
+          transform: vis ? 'scale(1) translateY(0)' : 'scale(0.82) translateY(24px)',
+          transition:'transform 0.38s cubic-bezier(0.34,1.56,0.64,1)',
+          overflow:'hidden', position:'relative',
+          fontFamily:'DM Mono, monospace',
+        }}
+      >
+        {/* Top glow line */}
+        {r.glow && <div style={{ height:2, background:`linear-gradient(90deg,transparent,${r.color},transparent)`, opacity:0.85 }}/>}
+
+        {/* Rarity badge */}
+        <div style={{
+          position:'absolute', top:10, right:10,
+          fontSize:7.5, letterSpacing:'0.2em', textTransform:'uppercase',
+          padding:'3px 9px', border:`1px solid ${r.border}`, color:r.color,
+          background:'rgba(2,13,24,0.85)',
+        }}>{r.label}</div>
+
+        {/* Icon + aura */}
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'center', paddingTop:26, paddingBottom:14, position:'relative' }}>
+          {r.glow && (
+            <div style={{
+              position:'absolute', width:88, height:88, borderRadius:'50%',
+              background:`radial-gradient(circle,${r.color}38 0%,transparent 70%)`,
+              animation:'aura-pulse 2s ease-in-out infinite',
+            }}/>
+          )}
+          <span style={{ fontSize:54, position:'relative', zIndex:1, filter: r.glow ? `drop-shadow(0 0 14px ${r.color})` : 'none' }}>
+            {item.icon}
+          </span>
+        </div>
+
+        {/* Name & price */}
+        <div style={{ padding:'0 18px 12px', textAlign:'center' }}>
+          <div style={{ fontFamily:'Cormorant Garamond,Georgia,serif', fontSize:21, fontWeight:300, color:'#e8f4f8', marginBottom:3 }}>
+            {item.name}
+          </div>
+          <div style={{ fontSize:12.5, color:r.color, letterSpacing:'0.05em' }}>
+            {fmtFishPrice(item.basePrice, item.unit)}
+          </div>
+        </div>
+
+        <div style={{ height:1, background:'rgba(0,212,255,0.12)', margin:'0 18px' }}/>
+
+        {/* Supply route */}
+        <div style={{ padding:'12px 18px 8px' }}>
+          <div style={{ fontSize:7.5, letterSpacing:'0.22em', textTransform:'uppercase', color:'#0094b8', marginBottom:5 }}>Supply Chain</div>
+          <div style={{ fontSize:10.5, color:'#a8ccd8', lineHeight:1.65 }}>{item.supplyRoute}</div>
+        </div>
+
+        {/* Routes */}
+        <div style={{ padding:'0 18px 12px' }}>
+          <div style={{ fontSize:7.5, letterSpacing:'0.22em', textTransform:'uppercase', color:'#0094b8', marginBottom:6 }}>Key Routes</div>
+          <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
+            {item.routes.map(rt => (
+              <span key={rt} style={{ fontSize:8.5, padding:'2px 7px', border:'1px solid rgba(0,212,255,0.2)', color:'#a8ccd8' }}>{rt}</span>
+            ))}
+          </div>
+        </div>
+
+        {/* Context */}
+        <div style={{ padding:'0 18px' }}>
+          <div style={{ fontSize:7.5, letterSpacing:'0.22em', textTransform:'uppercase', color:'#0094b8', marginBottom:5 }}>US Market</div>
+          <div style={{ fontSize:10.5, color:'#a8ccd8', lineHeight:1.65 }}>{item.context}</div>
+        </div>
+
+        <button
+          onClick={onDismiss}
+          style={{
+            display:'block', width:'100%', padding:'13px', marginTop:14,
+            background:'transparent', border:'none', borderTop:'1px solid rgba(0,212,255,0.14)',
+            color:'#00d4ff', fontFamily:'DM Mono,monospace', fontSize:8.5,
+            letterSpacing:'0.2em', textTransform:'uppercase', cursor:'pointer',
+          }}
+        >
+          Cast Again →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FishingGame({ onClose }) {
+  const [phase, setPhase] = useState('idle');
+  const [lineLen, setLineLen] = useState(0);
+  const [splash, setSplash] = useState(false);
+  const [catchItem, setCatchItem] = useState(null);
+  const [catchCount, setCatchCount] = useState(0);
+  const intervalRef = useRef(null);
+
+  const handleClick = useCallback(() => {
+    if (catchItem) return;
+    if (phase === 'idle') {
+      setPhase('casting');
+      setLineLen(0);
+      let l = 0;
+      const target = 55 + Math.random() * 38;
+      intervalRef.current = setInterval(() => {
+        l += 3.8;
+        setLineLen(Math.min(l, target));
+        if (l >= target) {
+          clearInterval(intervalRef.current);
+          setSplash(true);
+          setTimeout(() => setSplash(false), 700);
+        }
+      }, 18);
+    } else if (phase === 'casting') {
+      clearInterval(intervalRef.current);
+      setPhase('reeling');
+      let l = lineLen;
+      intervalRef.current = setInterval(() => {
+        l -= 4.5;
+        setLineLen(Math.max(0, l));
+        if (l <= 0) {
+          clearInterval(intervalRef.current);
+          setSplash(true);
+          setTimeout(() => {
+            setSplash(false);
+            setCatchItem(pickItem());
+            setCatchCount(n => n + 1);
+            setPhase('idle');
+            setLineLen(0);
+          }, 480);
+        }
+      }, 16);
+    }
+  }, [phase, catchItem, lineLen]);
+
+  useEffect(() => () => clearInterval(intervalRef.current), []);
+
+  return (
+    <>
+      <style>{`
+        @keyframes aura-pulse { 0%,100%{transform:scale(1);opacity:0.7} 50%{transform:scale(1.18);opacity:1} }
+        .fg-root { position:fixed;inset:0;z-index:200;background:#020d18;display:flex;flex-direction:column;overflow:hidden;font-family:'DM Mono',monospace;color:#e8f4f8; }
+        .fg-header { display:flex;align-items:center;justify-content:space-between;padding:13px 22px;border-bottom:1px solid rgba(0,212,255,0.18);background:rgba(2,13,24,0.94);backdrop-filter:blur(10px);flex-shrink:0;gap:12px; }
+        .fg-title { font-family:'Cormorant Garamond',Georgia,serif;font-size:19px;font-weight:300;letter-spacing:0.2em;text-transform:uppercase;color:#e8f4f8;white-space:nowrap; }
+        .fg-title span { color:#00d4ff; }
+        .fg-close { background:none;border:1px solid rgba(0,212,255,0.3);color:#a8ccd8;font-family:'DM Mono',monospace;font-size:8px;letter-spacing:0.18em;text-transform:uppercase;padding:6px 14px;cursor:pointer;transition:all 0.15s;white-space:nowrap;flex-shrink:0; }
+        .fg-close:hover { border-color:#00d4ff;color:#00d4ff; }
+        .fg-scene { flex:1;position:relative;cursor:pointer;overflow:hidden;min-height:0; }
+        .fg-legend { display:flex;gap:16px;align-items:center;justify-content:center;padding:9px 20px;border-top:1px solid rgba(0,212,255,0.12);background:rgba(2,13,24,0.92);flex-wrap:wrap;flex-shrink:0; }
+        .fg-legend-item { display:flex;align-items:center;gap:5px;font-size:8px;letter-spacing:0.14em;text-transform:uppercase;color:#6a9db0; }
+        .fg-dot { width:8px;height:8px;border-radius:50%;flex-shrink:0; }
+      `}</style>
+      <div className="fg-root">
+        <div className="fg-header">
+          <div className="fg-title">The <span>Current</span> — Deep Sea Market</div>
+          {catchCount > 0 && (
+            <div style={{ fontSize:9, letterSpacing:'0.14em', textTransform:'uppercase', color:'#00d4ff', flexShrink:0 }}>
+              {catchCount} caught
+            </div>
+          )}
+          <button className="fg-close" onClick={onClose}>← Dashboard</button>
+        </div>
+
+        <div className="fg-scene" onClick={handleClick}>
+          <BoatScene phase={phase} lineLen={lineLen} splash={splash} />
+          {catchItem && <CatchCard item={catchItem} onDismiss={() => setCatchItem(null)} />}
+        </div>
+
+        <div className="fg-legend">
+          {Object.entries(RARITY).map(([key, r]) => (
+            <div key={key} className="fg-legend-item">
+              <div className="fg-dot" style={{
+                background: key === 'common' ? '#a8ccd8' : r.color,
+                boxShadow: r.glow ? `0 0 7px 2px ${r.color}99` : 'none',
+              }}/>
+              {r.label}
+            </div>
+          ))}
+          <div style={{ fontSize:7.5, color:'#3d6275', letterSpacing:'0.1em', marginLeft:6 }}>
+            Higher price = rarer catch
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── Translated event / route / commodity content ─────────────────────────────
+
+const EVENTS = {
+  en: [
+    { id:1, title:'Trade Route Diversion',       location:'Suez Canal / Red Sea',          impact:'Critical', type:'geopolitical', description:'Regional instability has forced ~70% of container ships to reroute around the Cape of Good Hope, adding 10–14 days to transit and significantly raising insurance premiums for all affected cargo.' },
+    { id:2, title:'Anomalous Thermocline Shift',  location:'Equatorial Pacific (Niño 3.4)', impact:'High',     type:'climate',      description:'A sudden warming of subsurface waters signals a strengthening El Niño pattern, likely delaying South American agricultural exports and elevating hurricane risk across the Gulf of Mexico.' },
+    { id:3, title:'Port Labor Negotiations',      location:'West Coast US Hubs',            impact:'Medium',   type:'logistics',    description:'Ongoing automation and wage discussions are causing minor processing backlogs at LA/Long Beach, with knock-on delays for tech hardware and agricultural imports through the Pacific gateway.' },
+  ],
+  es: [
+    { id:1, title:'Desvío de Ruta Comercial',                  location:'Canal de Suez / Mar Rojo',          impact:'Critical', type:'geopolitical', description:'La inestabilidad regional ha obligado a ~70% de los portacontenedores a rodear el Cabo de Buena Esperanza, añadiendo 10–14 días de tránsito y elevando las primas de seguros para toda la carga afectada.' },
+    { id:2, title:'Desplazamiento Anómalo de Termoclina',      location:'Pacífico Ecuatorial (Niño 3.4)',    impact:'High',     type:'climate',      description:'Un calentamiento repentino de aguas subsuperficiales señala un patrón de El Niño en fortalecimiento, que probablemente retrasará las exportaciones agrícolas sudamericanas y elevará el riesgo de huracanes en el Golfo de México.' },
+    { id:3, title:'Negociaciones Laborales Portuarias',        location:'Centros Logísticos, Costa Oeste EE.UU.', impact:'Medium', type:'logistics', description:'Los debates sobre automatización y salarios están generando pequeños retrasos en LA/Long Beach, con efectos en cadena sobre las importaciones de tecnología y productos agrícolas a través de la puerta del Pacífico.' },
+  ],
+  zh: [
+    { id:1, title:'贸易航线改道',   location:'苏伊士运河 / 红海',       impact:'Critical', type:'geopolitical', description:'地区局势不稳导致约70%的集装箱船被迫绕行好望角，航程延长10至14天，所有受影响货物的保险费大幅上涨。' },
+    { id:2, title:'异常温跃层偏移', location:'赤道太平洋（Niño 3.4区）', impact:'High',     type:'climate',      description:'次表层水温骤升，预示厄尔尼诺现象增强，可能推迟南美农产品出口，并提升墨西哥湾的飓风风险。' },
+    { id:3, title:'港口劳资谈判',   location:'美国西海岸主要港口',        impact:'Medium',   type:'logistics',    description:'自动化与薪资谈判导致洛杉矶/长滩港口出现轻微积压，波及通过太平洋门户进口的科技硬件和农产品。' },
+  ],
+};
+
+const ROUTES = {
+  en: [
+    { id:'red_sea',    name:'Red Sea / Suez Canal',     icon:'🔴', status:'critical',  region:'Red Sea Corridor',   transit:'Europe to Asia',            throughput:'~12% of global trade',            delay:'+10–14 days (Cape rerouting)',     affected:['coffee','cocoa','cotton','rubber','crude','lng','aluminum','lithium'],     description:'Active geopolitical instability has forced ~70% of container shipping to reroute via the Cape of Good Hope. Insurance war-risk premiums have surged over 300%. Affected commodities face 10–14 day transit extensions and 15–25% freight cost increases.',          alternatives:['Cape of Good Hope (+12–15 days)','Air freight (10–20× cost premium)'] },
+    { id:'panama',     name:'Panama Canal',              icon:'🟡', status:'reduced',   region:'Gulf of Mexico',      transit:'Pacific to Atlantic',       throughput:'~5% of global trade',             delay:'Draft limits −40%',               affected:['copper','soybeans','corn','wheat','lng','timber','crude'],                  description:'Prolonged drought has reduced Gatun Lake water levels, forcing the Canal Authority to cut daily transits by ~40% and impose strict draft restrictions. Bulk carriers are most heavily affected, pushing overflow traffic to Cape Horn routing.',                    alternatives:['Cape Horn (+20–25 days)','US rail landbridge (limited capacity)'] },
+    { id:'scs',        name:'South China Sea',            icon:'🟡', status:'elevated',  region:'Equatorial Pacific',  transit:'East Asia to Global',       throughput:'~30% of global maritime traffic', delay:'On schedule (monitoring active)',  affected:['chips','rubber','rice','steel','lithium'],                                  description:'Territorial disputes and periodic naval exercises create ongoing operational risk for trans-Pacific shipping. Current posture does not affect normal transit, but any escalation would immediately disrupt semiconductor and electronics supply chains.',              alternatives:['Lombok Strait (longer, congested)','Sunda Strait (shallower draft limits)'] },
+    { id:'trans_pac',  name:'Trans-Pacific Route',        icon:'🟢', status:'normal',    region:'Pacific North',       transit:'Asia to US West Coast',     throughput:'~40% of US imports',              delay:'On schedule',                     affected:['chips','copper','aluminum','lithium','rice','rubber','soybeans'],            description:'Trans-Pacific routes from East Asian manufacturing hubs to Los Angeles, Long Beach, and Seattle are operating normally. Port congestion has eased significantly since 2022, with standard 12–14 day transit times being maintained.',                            alternatives:['Suez Canal route (via EU — longer)','Air freight (electronics only)'] },
+    { id:'n_atlantic', name:'North Atlantic Route',       icon:'🟢', status:'normal',    region:'North Atlantic',      transit:'US East Coast to Europe',   throughput:'~25% of US trade value',          delay:'On schedule',                     affected:['wheat','barley','coffee','cocoa','steel','lng','cotton'],                   description:'North Atlantic trade lanes between US East Coast ports and European hubs are operating normally. This route carries significant volumes of agricultural commodities, refined metals, and LNG exports. Seasonal winter routing adds 1–2 days without material disruption.', alternatives:['Arctic Northern Sea Route (seasonal, limited tonnage)'] },
+    { id:'cape_route', name:'Indian Ocean / Cape Route',  icon:'🟠', status:'congested', region:'Indian Ocean',         transit:'Asia to Europe (Cape)',      throughput:'Significantly elevated volume',    delay:'+3–5 days (port congestion)',      affected:['coffee','cocoa','rubber','cotton','aluminum'],                              description:'The Cape of Good Hope route is experiencing unprecedented congestion as Suez-displaced vessels reroute south. South African ports are overwhelmed, creating secondary bottlenecks and surcharges expected to persist through mid-2026.',                             alternatives:['No fully viable alternatives at current displaced volumes'] },
+  ],
+  es: [
+    { id:'red_sea',    name:'Mar Rojo / Canal de Suez',  icon:'🔴', status:'critical',  region:'Red Sea Corridor',   transit:'Europa a Asia',             throughput:'~12% del comercio global',         delay:'+10–14 días (rodeo por el Cabo)',  affected:['coffee','cocoa','cotton','rubber','crude','lng','aluminum','lithium'],     description:'La inestabilidad geopolítica activa ha obligado a ~70% del transporte de contenedores a redirigirse vía el Cabo de Buena Esperanza. Las primas de seguro por riesgo de guerra han aumentado más del 300%. Las materias primas afectadas enfrentan extensiones de tránsito de 10–14 días y aumentos de fletes del 15–25%.',     alternatives:['Cabo de Buena Esperanza (+12–15 días)','Carga aérea (prima de coste 10–20×)'] },
+    { id:'panama',     name:'Canal de Panamá',           icon:'🟡', status:'reduced',   region:'Gulf of Mexico',      transit:'Pacífico a Atlántico',      throughput:'~5% del comercio global',          delay:'Límites de calado −40%',          affected:['copper','soybeans','corn','wheat','lng','timber','crude'],                  description:'La sequía prolongada ha reducido el nivel del lago Gatún, obligando a la Autoridad del Canal a recortar los tránsitos diarios en ~40% e imponer restricciones estrictas de calado. Los graneleros son los más afectados, empujando el exceso de tráfico hacia la ruta del Cabo de Hornos.',     alternatives:['Cabo de Hornos (+20–25 días)','Puente terrestre ferroviario de EE.UU. (capacidad limitada)'] },
+    { id:'scs',        name:'Mar del Sur de China',      icon:'🟡', status:'elevated',  region:'Equatorial Pacific',  transit:'Este de Asia a Global',     throughput:'~30% del tráfico marítimo global', delay:'En horario (monitoreo activo)',    affected:['chips','rubber','rice','steel','lithium'],                                  description:'Las disputas territoriales y los ejercicios navales periódicos crean un riesgo operativo continuo para el transporte transpacífico. La postura actual no afecta el tránsito normal, pero cualquier escalada interrumpiría de inmediato las cadenas de suministro de semiconductores y electrónica.',              alternatives:['Estrecho de Lombok (más largo, congestionado)','Estrecho de Sunda (calado más reducido)'] },
+    { id:'trans_pac',  name:'Ruta Transpacífica',        icon:'🟢', status:'normal',    region:'Pacific North',       transit:'Asia a Costa Oeste EE.UU.', throughput:'~40% de las importaciones de EE.UU.', delay:'En horario',                affected:['chips','copper','aluminum','lithium','rice','rubber','soybeans'],            description:'Las rutas transpacíficas desde los centros de manufactura del Este de Asia hasta Los Ángeles, Long Beach y Seattle operan con normalidad. La congestión portuaria se ha reducido significativamente desde 2022, manteniéndose los tiempos de tránsito estándar de 12–14 días.',                               alternatives:['Ruta del Canal de Suez (vía UE, más larga)','Carga aérea (solo electrónica)'] },
+    { id:'n_atlantic', name:'Ruta del Atlántico Norte',  icon:'🟢', status:'normal',    region:'North Atlantic',      transit:'Costa Este EE.UU. a Europa',throughput:'~25% del valor comercial de EE.UU.',  delay:'En horario',              affected:['wheat','barley','coffee','cocoa','steel','lng','cotton'],                   description:'Las rutas comerciales del Atlántico Norte entre los puertos de la Costa Este de EE.UU. y los centros europeos operan con normalidad. Esta ruta transporta grandes volúmenes de materias primas agrícolas, metales refinados y exportaciones de GNL.',                                                           alternatives:['Ruta Ártica del Mar del Norte (estacional, tonelaje limitado)'] },
+    { id:'cape_route', name:'Océano Índico / Ruta del Cabo', icon:'🟠', status:'congested', region:'Indian Ocean', transit:'Asia a Europa (Cabo)',       throughput:'Volumen significativamente elevado', delay:'+3–5 días (congestión portuaria)', affected:['coffee','cocoa','rubber','cotton','aluminum'],                             description:'La ruta del Cabo de Buena Esperanza experimenta una congestión sin precedentes a medida que los buques desplazados del Canal de Suez redirigen hacia el sur. Los puertos sudafricanos están saturados, generando cuellos de botella y sobrecargos que se espera persistan hasta mediados de 2026.',              alternatives:['Sin alternativas completamente viables al volumen actual desplazado'] },
+  ],
+  zh: [
+    { id:'red_sea',    name:'红海 / 苏伊士运河',           icon:'🔴', status:'critical',  region:'Red Sea Corridor',   transit:'欧洲至亚洲',             throughput:'约占全球贸易量12%',                delay:'+10–14天（绕好望角）',            affected:['coffee','cocoa','cotton','rubber','crude','lng','aluminum','lithium'],     description:'持续的地缘政治不稳定迫使约70%的集装箱运输绕道好望角。战争风险保险费飙升逾300%。受影响商品面临10–14天的航程延误和15–25%的运费上涨。',                                                                                                                                                                                        alternatives:['好望角航线（+12–15天）','航空货运（成本高出10–20倍）'] },
+    { id:'panama',     name:'巴拿马运河',                   icon:'🟡', status:'reduced',   region:'Gulf of Mexico',      transit:'太平洋至大西洋',         throughput:'约占全球贸易量5%',                 delay:'吃水限制 −40%',                   affected:['copper','soybeans','corn','wheat','lng','timber','crude'],                  description:'长期干旱导致加通湖水位下降，迫使巴拿马运河管理局将日过闸次数削减约40%并实施严格吃水限制。散货船受影响最重，大量运力转移至合恩角航线。',                                                                                                                                                                                           alternatives:['合恩角航线（+20–25天）','美国铁路大陆桥（运力有限）'] },
+    { id:'scs',        name:'南海',                         icon:'🟡', status:'elevated',  region:'Equatorial Pacific',  transit:'东亚至全球',             throughput:'约占全球海运量30%',                delay:'正常通行（持续监控）',            affected:['chips','rubber','rice','steel','lithium'],                                  description:'领土争端与定期海军演习为跨太平洋航运持续带来操作风险。当前态势不影响正常通行，但任何局势升级都将立即扰乱半导体和电子供应链。',                                                                                                                                                                                                 alternatives:['龙目海峡（更长、拥堵）','巽他海峡（吃水较浅）'] },
+    { id:'trans_pac',  name:'跨太平洋航线',                 icon:'🟢', status:'normal',    region:'Pacific North',       transit:'亚洲至美国西海岸',       throughput:'约占美国进口量40%',                delay:'准时',                            affected:['chips','copper','aluminum','lithium','rice','rubber','soybeans'],            description:'从东亚制造业中心至洛杉矶、长滩及西雅图的跨太平洋航线运营正常。自2022年以来港口拥堵已大幅缓解，标准12–14天航程得以维持。',                                                                                                                                                                                                      alternatives:['苏伊士运河航线（经欧洲，更长）','航空货运（仅限电子产品）'] },
+    { id:'n_atlantic', name:'北大西洋航线',                 icon:'🟢', status:'normal',    region:'North Atlantic',      transit:'美国东海岸至欧洲',       throughput:'约占美国贸易额25%',                delay:'准时',                            affected:['wheat','barley','coffee','cocoa','steel','lng','cotton'],                   description:'连接美国东海岸港口与欧洲枢纽的北大西洋贸易航线运营正常。该航线承载大量农产品、精炼金属及液化天然气出口。冬季绕行可能增加1–2天，但不造成实质性干扰。',                                                                                                                                                                          alternatives:['北极东北航道（季节性，吨位有限）'] },
+    { id:'cape_route', name:'印度洋 / 好望角航线',          icon:'🟠', status:'congested', region:'Indian Ocean',         transit:'亚洲至欧洲（好望角）',   throughput:'运量大幅增加',                     delay:'+3–5天（港口拥堵）',              affected:['coffee','cocoa','rubber','cotton','aluminum'],                              description:'随着苏伊士运河改道船只大量南下，好望角航线正经历前所未有的拥堵。南非港口超负荷运转，产生次级瓶颈和附加费，预计这种情况将持续至2026年中。',                                                                                                                                                                                         alternatives:['当前改道规模下无完全可行的替代方案'] },
+  ],
+};
+
+const COMMODITY_TEXT = {
+  en: {
+    wheat:    { supplyRoute:'Black Sea and Pacific routes supply ~35% of US imports; disruptions raise flour and bread costs for American consumers.', context:'US wheat futures softened in early 2026 amid large domestic harvests, though Black Sea supply uncertainty persists.' },
+    corn:     { supplyRoute:'Corn is primarily domestically sourced, but Gulf of Mexico shipping lanes affect global benchmark prices.', context:'US corn prices are subdued in early 2026 due to large domestic stockpiles and steady ethanol demand.' },
+    soybeans: { supplyRoute:'Brazilian soybeans compete with US exports on Pacific and Atlantic routes; disruptions tighten domestic supply for US processors.', context:'US soybean prices are moderately stable with strong domestic production offsetting global uncertainty.' },
+    rice:     { supplyRoute:'Southeast Asian rice crosses Indian Ocean and Pacific lanes; disruptions directly impact US import prices from Thailand and Vietnam.', context:'US rice import prices have risen modestly following Indian export restrictions in late 2025.' },
+    barley:   { supplyRoute:'Australian and European barley transits Indian Ocean and Atlantic routes; disruptions raise costs for US craft brewers and feed producers.', context:'US barley prices remain stable in early 2026 with steady domestic malt demand.' },
+    coffee:   { supplyRoute:'Brazilian and Colombian beans transit Atlantic corridors; Red Sea disruptions add 8–12 days and insurance costs to East Coast roasters.', context:'US retail coffee prices have risen sharply, with Arabica futures near 10-year highs in early 2026.' },
+    cocoa:    { supplyRoute:'West African cocoa (60% of global supply) transits the Atlantic; instability raises costs for US chocolate manufacturers importing through East Coast ports.', context:'Cocoa prices remain elevated following consecutive years of poor West African harvests and supply shortfalls.' },
+    sugar:    { supplyRoute:'Brazilian sugar ships through Atlantic lanes; Caribbean supply for US refiners is sensitive to Gulf of Mexico weather and freight rates.', context:'US refined sugar prices remain above historical norms due to import quota pressures and strong domestic demand.' },
+    avocado:  { supplyRoute:'Mexican avocados primarily cross the US-Mexico land border, but Peruvian imports transit Pacific sea lanes — disruptions shift US buyers toward more expensive Mexican supply.', context:'US avocado retail prices are moderately elevated after California drought reduced domestic output.' },
+    copper:   { supplyRoute:'Chilean and Peruvian copper ships through the Panama Canal and Pacific lanes; any canal restriction immediately tightens US manufacturing supply chains.', context:'Copper is near multi-year highs driven by AI data center and EV infrastructure demand in early 2026.' },
+    aluminum: { supplyRoute:'Middle Eastern and Australian aluminum ships through Indian Ocean and Pacific routes; Red Sea instability raises freight premiums for US buyers.', context:'US aluminum prices reflect strong domestic tariff protection, though global disruptions still affect spot pricing.' },
+    steel:    { supplyRoute:'Imported coil from Brazil and South Korea via Atlantic and Pacific routes benchmarks domestic prices — freight disruptions tighten supply for US mills.', context:'US hot-rolled coil prices are stable with Section 232 tariffs maintaining domestic price floors.' },
+    lithium:  { supplyRoute:'Chilean and Australian lithium ships through Pacific lanes; any disruption to Atacama brine exports sharply tightens US battery supply chains.', context:'Lithium prices have partially recovered from a 2024–2025 glut, supported by renewed US EV production incentives.' },
+    chips:    { supplyRoute:'Taiwan and South Korean chips cross the Pacific; any disruption to trans-Pacific shipping causes immediate supply shortfalls for US electronics manufacturers.', context:'Advanced semiconductor prices remain elevated as AI chip demand continues to outpace fab capacity in early 2026.' },
+    crude_oil:{ supplyRoute:'US crude is largely domestic, but global benchmark pricing is highly sensitive to Strait of Hormuz and Red Sea instability, affecting insurance and freight for imported grades.', context:'WTI crude oil is trading near $76/barrel in early 2026, supported by OPEC+ production discipline.' },
+    lng:      { supplyRoute:'US LNG exports transit Atlantic and Pacific; European demand diverted by Red Sea rerouting reduces available tankers, raising shipping costs from Gulf Coast terminals.', context:'US LNG export prices are moderately elevated as European buyers continue to prioritize US supply.' },
+    fuel:     { supplyRoute:'Gulf of Mexico refineries supply most US marine fuel, but Red Sea disruptions raise bunker fuel demand globally, pushing MGO prices up at all US ports.', context:'MGO prices at US ports have risen roughly 15% since mid-2025, reflecting crude increases and route-related demand spikes.' },
+    timber:   { supplyRoute:'Canadian softwood is trucked and railed into the US, but imported hardwoods from Southeast Asia cross Pacific lanes — disruptions raise furniture and flooring costs.', context:'US lumber prices are moderately stable, above 2023 lows but well below the 2021 pandemic peak.' },
+    cotton:   { supplyRoute:'Import disruptions from India and Bangladesh via Indian Ocean routes affect US textile mills sourcing specialty yarns and finished fabrics.', context:'US cotton prices are pressured by strong domestic production and relatively soft global apparel demand.' },
+    rubber:   { supplyRoute:'Thai, Indonesian, and Vietnamese rubber crosses Indian Ocean and Pacific to US tyre manufacturers; Asian shipping disruptions cause near-immediate US price spikes.', context:'Natural rubber prices are firming as Southeast Asian production faces weather-related supply constraints in early 2026.' },
+  },
+  es: {
+    wheat:    { supplyRoute:'Las rutas del Mar Negro y el Pacífico suministran ~35% de las importaciones de EE.UU.; las disrupciones elevan el coste de la harina y el pan para los consumidores americanos.', context:'Los futuros de trigo en EE.UU. se suavizaron a principios de 2026 por grandes cosechas domésticas, aunque persiste la incertidumbre en el suministro del Mar Negro.' },
+    corn:     { supplyRoute:'El maíz se obtiene principalmente de producción doméstica, pero las vías marítimas del Golfo de México afectan los precios de referencia globales.', context:'Los precios del maíz en EE.UU. están contenidos en 2026 por grandes existencias domésticas y demanda estable de etanol.' },
+    soybeans: { supplyRoute:'La soja brasileña compite con las exportaciones de EE.UU. en rutas del Pacífico y el Atlántico; las disrupciones reducen el suministro interno para los procesadores estadounidenses.', context:'Los precios de la soja en EE.UU. son moderadamente estables con fuerte producción interna.' },
+    rice:     { supplyRoute:'El arroz del Sudeste Asiático cruza el Océano Índico y el Pacífico; las disrupciones impactan directamente los precios de importación de Tailandia y Vietnam.', context:'Los precios de importación de arroz en EE.UU. han subido modestamente tras las restricciones exportadoras de India en 2025.' },
+    barley:   { supplyRoute:'La cebada australiana y europea transita por el Océano Índico y el Atlántico; las disrupciones elevan costes para cervecerías artesanales y productores de pienso.', context:'Los precios de cebada en EE.UU. permanecen estables en 2026 con demanda estable de malta.' },
+    coffee:   { supplyRoute:'Los granos de Brasil y Colombia transitan por el Atlántico; las disrupciones en el Mar Rojo añaden 8–12 días y costes de seguro a los tostadores de la Costa Este.', context:'Los precios minoristas del café en EE.UU. han subido bruscamente; los futuros del Arábica alcanzan máximos de 10 años en 2026.' },
+    cocoa:    { supplyRoute:'El cacao de África Occidental (60% del suministro global) transita el Atlántico; la inestabilidad eleva costes para los fabricantes de chocolate estadounidenses.', context:'Los precios del cacao siguen elevados tras años consecutivos de malas cosechas en África Occidental.' },
+    sugar:    { supplyRoute:'El azúcar brasileño navega por el Atlántico; el suministro caribeño para refinerías de EE.UU. es sensible al clima del Golfo de México y los fletes.', context:'Los precios del azúcar refinado en EE.UU. se mantienen por encima de normas históricas por cuotas de importación y fuerte demanda interna.' },
+    avocado:  { supplyRoute:'Los aguacates mexicanos cruzan principalmente la frontera terrestre EE.UU.-México, pero las importaciones peruanas transitan por el Pacífico, desviando compradores hacia el suministro mexicano más caro.', context:'Los precios minoristas del aguacate en EE.UU. están moderadamente elevados tras la sequía en California.' },
+    copper:   { supplyRoute:'El cobre chileno y peruano pasa por el Canal de Panamá y el Pacífico; cualquier restricción del canal tensa inmediatamente las cadenas de suministro de manufactura estadounidense.', context:'El cobre está cerca de máximos históricos impulsado por centros de datos de IA e infraestructura de vehículos eléctricos en 2026.' },
+    aluminum: { supplyRoute:'El aluminio de Oriente Medio y Australia transita por el Océano Índico y el Pacífico; la inestabilidad en el Mar Rojo eleva las primas de flete para compradores estadounidenses.', context:'Los precios del aluminio en EE.UU. reflejan fuerte protección arancelaria, aunque las disrupciones globales siguen afectando los precios al contado.' },
+    steel:    { supplyRoute:'La bobina importada de Brasil y Corea del Sur por el Atlántico y el Pacífico establece el precio de referencia doméstico; las disrupciones de flete reducen el suministro para las acerías de EE.UU.', context:'Los precios del acero en EE.UU. son estables con los aranceles de la Sección 232 manteniendo los precios mínimos domésticos.' },
+    lithium:  { supplyRoute:'El litio de Chile y Australia transita por el Pacífico; cualquier interrupción en las exportaciones de salmuera del Atacama reduce abruptamente las cadenas de suministro de baterías en EE.UU.', context:'Los precios del litio se han recuperado parcialmente del exceso de oferta 2024–2025, apoyados por los nuevos incentivos de producción de VE en EE.UU.' },
+    chips:    { supplyRoute:'Los chips de Taiwán y Corea del Sur cruzan el Pacífico; cualquier disrupción en el transporte transpacífico causa desabastecimiento inmediato para fabricantes de electrónica en EE.UU.', context:'Los precios de semiconductores avanzados siguen elevados mientras la demanda de chips de IA supera la capacidad de las fábricas en 2026.' },
+    crude_oil:{ supplyRoute:'El crudo de EE.UU. es principalmente doméstico, pero los precios globales de referencia son muy sensibles a la inestabilidad en el Estrecho de Ormuz y el Mar Rojo.', context:'El WTI cotiza cerca de $76/barril en 2026, sostenido por la disciplina de producción de la OPEP+ y una demanda global moderada.' },
+    lng:      { supplyRoute:'Las exportaciones de GNL de EE.UU. transitan por el Atlántico y el Pacífico; la demanda europea desviada por el Mar Rojo reduce los tanqueros disponibles, elevando costes de embarque desde la Costa del Golfo.', context:'Los precios de exportación de GNL de EE.UU. están moderadamente elevados mientras los compradores europeos priorizan el suministro estadounidense.' },
+    fuel:     { supplyRoute:'Las refinerías del Golfo de México abastecen la mayor parte del combustible marino de EE.UU., pero las disrupciones en el Mar Rojo elevan la demanda global de búnker, subiendo los precios del MGO en todos los puertos.', context:'Los precios del MGO en puertos de EE.UU. han subido aproximadamente un 15% desde mediados de 2025.' },
+    timber:   { supplyRoute:'La madera blanda canadiense entra por tierra y ferrocarril, pero las maderas duras del Sudeste Asiático cruzan el Pacífico; las disrupciones elevan los costes de muebles y pisos.', context:'Los precios de la madera en EE.UU. son moderadamente estables, por encima de los mínimos de 2023 pero muy por debajo del pico de 2021.' },
+    cotton:   { supplyRoute:'Las disrupciones en importaciones de India y Bangladesh por el Océano Índico afectan a las hilanderías textiles de EE.UU. que abastecen de hilados especiales y tejidos terminados.', context:'Los precios del algodón en EE.UU. están bajo presión por la fuerte producción doméstica y la débil demanda global de confección.' },
+    rubber:   { supplyRoute:'El caucho de Tailandia, Indonesia y Vietnam cruza el Océano Índico y el Pacífico hasta los fabricantes de neumáticos en EE.UU.; las disrupciones en Asia causan subidas de precio casi inmediatas.', context:'Los precios del caucho natural se están endureciendo en 2026 porque la producción del Sudeste Asiático enfrenta restricciones climáticas.' },
+  },
+  zh: {
+    wheat:    { supplyRoute:'黑海和太平洋航线提供美国约35%的进口小麦；中断将推高美国消费者的面粉和面包价格。', context:'2026年初因国内丰收，美国小麦期货走软，但黑海供应的不确定性仍持续。' },
+    corn:     { supplyRoute:'玉米以国内产为主，但墨西哥湾航运通道影响全球基准价格。', context:'2026年初美国玉米价格因国内库存充裕和乙醇需求稳定而保持低迷。' },
+    soybeans: { supplyRoute:'巴西大豆通过太平洋和大西洋航线与美国出口竞争；中断将收紧美国加工商的国内供应。', context:'2026年初美国大豆价格较为稳定，强劲的国内产量抵消了全球不确定性。' },
+    rice:     { supplyRoute:'东南亚大米经印度洋和太平洋航线运输；航线中断直接影响泰国和越南的美国进口价格。', context:'2025年末印度出口限制后，美国大米进口价格小幅上涨。' },
+    barley:   { supplyRoute:'澳大利亚和欧洲大麦经印度洋和大西洋运输；中断推高美国精酿啤酒厂和饲料生产商的成本。', context:'2026年初受国内麦芽需求稳定支撑，美国大麦价格保持稳定。' },
+    coffee:   { supplyRoute:'巴西和哥伦比亚咖啡豆经大西洋走廊运输；红海中断使东海岸烘焙商的运输时间增加8–12天，保险费用上涨。', context:'2026年初美国零售咖啡价格大幅上涨，阿拉比卡期货接近10年高位。' },
+    cocoa:    { supplyRoute:'西非可可（占全球供应量60%）经大西洋运输；不稳定局势推高美国巧克力制造商通过东海岸港口进口的成本。', context:'受西非连续歉收和供应短缺影响，可可价格持续高企。' },
+    sugar:    { supplyRoute:'巴西蔗糖经大西洋航线运输；加勒比海向美国炼糖厂的供应受墨西哥湾天气和运费影响较大。', context:'受进口配额压力和强劲国内需求影响，美国精制糖价格仍高于历史常态。' },
+    avocado:  { supplyRoute:'墨西哥牛油果主要经陆路口岸进入美国，但秘鲁进口需经太平洋航线——航线中断使美国买家转向更贵的墨西哥供应。', context:'加利福尼亚州干旱减少国内产量后，美国牛油果零售价格适度偏高。' },
+    copper:   { supplyRoute:'智利和秘鲁铜矿通过巴拿马运河和太平洋航线运输；任何运河限制立即收紧美国制造业供应链。', context:'2026年初受AI数据中心和电动汽车基础设施需求驱动，铜价接近多年高位。' },
+    aluminum: { supplyRoute:'中东和澳大利亚铝材经印度洋和太平洋航线运输；红海不稳定抬高美国买家的运费溢价。', context:'美国铝价受强力关税保护，但全球中断仍影响现货定价。' },
+    steel:    { supplyRoute:'巴西和韩国通过大西洋和太平洋进口的卷钢为国内价格提供参照基准——运费中断收紧美国钢厂供应。', context:'受232条款关税维持国内价格底部支撑，美国热轧卷钢价格稳定。' },
+    lithium:  { supplyRoute:'智利和澳大利亚锂矿通过太平洋航线运输；阿塔卡马盐水出口受阻将急剧收紧美国电池供应链。', context:'在美国电动汽车生产激励措施的支撑下，锂价从2024–2025年供应过剩中部分回升。' },
+    chips:    { supplyRoute:'台湾和韩国芯片经太平洋运输；跨太平洋航运中断将立即造成美国电子制造商供应短缺。', context:'2026年初AI芯片需求持续超过晶圆厂产能，先进半导体价格仍处高位。' },
+    crude_oil:{ supplyRoute:'美国原油以国内产为主，但全球基准价格对霍尔木兹海峡和红海不稳定高度敏感，影响进口油品的保险和运费。', context:'2026年初WTI原油交易价格约为每桶76美元，受欧佩克+生产纪律和适度全球需求支撑。' },
+    lng:      { supplyRoute:'美国液化天然气出口经大西洋和太平洋运输；红海绕行分流欧洲需求，减少可用船舱，推高墨西哥湾岸装运成本。', context:'随着欧洲买家持续优先采购美国供应，美国液化天然气出口价格保持适度偏高。' },
+    fuel:     { supplyRoute:'墨西哥湾炼油厂供应大部分美国船用燃料，但红海中断在全球范围内推高船用燃料需求，导致所有美国港口MGO价格上涨。', context:'美国港口MGO价格自2025年中以来上涨约15%，反映了原油价格上涨和航线相关需求激增。' },
+    timber:   { supplyRoute:'加拿大软木通过公路和铁路进入美国，但东南亚硬木进口需经太平洋航线——中断推高家具和地板成本。', context:'美国木材价格较为稳定，高于2023年低点但远低于2021年大流行病高峰。' },
+    cotton:   { supplyRoute:'印度和孟加拉国经印度洋的进口中断影响美国纺织厂采购特种纱线和成品面料。', context:'强劲的国内产量和相对疲软的全球服装需求对美国棉花价格形成压力。' },
+    rubber:   { supplyRoute:'泰国、印度尼西亚和越南橡胶经印度洋和太平洋运往美国轮胎制造商；亚洲航运中断几乎立即导致美国价格上涨。', context:'2026年初东南亚产区遭受气候制约，天然橡胶价格持续走强。' },
+  },
+};
+
+const T = {
+  en: {
+    brandSub:'Maritime Intelligence Platform', tabPulse:'Pulse', tabPrices:'Prices', tabRoutes:'Routes',
+    kickerDash:'Global Maritime Intelligence', stabilityIndex:'Stability Index · Live',
+    surfaceTemp:'Surface Temp', waveHeight:'Wave Height', climateDelta:'Climate Delta', windSpeed:'Wind Speed',
+    observed:'Observed', significant:'Significant', surface:'Surface',
+    aboveBaseline:'Above baseline', belowBaseline:'Below baseline',
+    securityAdvisory:'Security & Stability Advisory',
+    alertBody:(loc,pct)=>`Regional instability is impacting ${loc}. Rerouting and elevated insurance premiums are pushing costs up ~${pct}%.`,
+    searchRegion:'Region', selectBtn:'Select', filterRegion:'Filter regions — Red Sea, Pacific, Atlantic…',
+    worldEvents:'World Events', routeViability:'Route Viability', activeCorridor:'Active Corridors',
+    capeDiversion:'Cape Diversion', capeVal:'Active +12d', panamaLimits:'Panama Draft Limits', panamaVal:'Reduced −40%',
+    arcticNSR:'Arctic NSR Status', arcticVal:'Open — Ice-Free', checkPriceBtn:'Check Price Impact →',
+    integratedRisk:'Integrated Risk', tradeFlow:'Trade Flow', globalSec:'Global Security', ecosystem:'Ecosystem',
+    kickerWallet:'Price Intelligence', walletTitle:'US Market', walletTitleEm:'Price Predictor',
+    lookupSh:'AI-Powered Item Lookup', badgeTxt:(n)=>`🇺🇸 US market prices · live ticking · ${n} commodities tracked`,
+    searchPlaceholder:(n)=>`Search ${n} commodities, or type anything for AI lookup…`,
+    livePrice:'Live Price', predictedPrice:'Predicted Price', predictedSub:'6-month forecast',
+    vsBaseline:'vs baseline', supplyChain:'Supply Chain Impact', usMarket:'US Market Context',
+    origins:'Origins', keyRoutes:'Key Routes', maritimeSens:'Maritime sensitivity',
+    stable:'Stable', volatile:'Volatile', critical:'Critical',
+    routeStatusFilter:'Route Status Filter', allRoutes:'All Routes',
+    disrupted:'🔴 Disrupted', restricted:'🟡 Restricted', elevatedRisk:'🟠 Elevated Risk',
+    congested:'🟠 Congested', operational:'🟢 Operational', seasonal:'🔵 Seasonal',
+    transit:'Transit:', volume:'Volume:', region:'Region:', impact:'Impact',
+    affectedComm:'Affected commodities — click to price', altRouting:'Alternative routing',
+    scanning:'Scanning maritime conditions…', depthReadFailed:'Depth reading failed — signal lost. Please try again.',
+    footerBrand:'The Current · Information Systems',
+    footerDesc:(n)=>`AI-powered analysis combined with oceanographic and geopolitical modelling to predict US commodity price impacts. ${n} commodities tracked across 6 major trade corridors.`,
+    footerSrcTitle:'Data Sources & Citations', footerBar:(n)=>`${n} Commodities · 6 Trade Routes · Live AI Pricing`,
+    notFoundTitle:(q)=>`"${q}" not found in commodity database`,
+    notFoundBody:'This item does not appear to be a tradeable commodity with maritime price exposure. The Current tracks goods physically shipped via ocean freight routes.',
+    notFoundHint:(s)=>s?`Did you mean: `:'Try searching for: wheat, copper, coffee, lithium, crude oil, semiconductors, cotton, rubber.',
+    usBaseline:'US baseline', stabilityReport:'Stability Report',
+    searchLabel:'Search', threeMonth:'3mo', moreSuggestions:(n)=>`+${n} more`,
+    routeGlobalKicker:'Global Trade Corridors · Live Status', routeTitle:'Maritime Routes',
+  },
+  es: {
+    brandSub:'Plataforma de Inteligencia Marítima', tabPulse:'Pulso', tabPrices:'Precios', tabRoutes:'Rutas',
+    kickerDash:'Inteligencia Marítima Global', stabilityIndex:'Índice de Estabilidad · En Vivo',
+    surfaceTemp:'Temp. Superficial', waveHeight:'Altura de Olas', climateDelta:'Delta Climático', windSpeed:'Velocidad del Viento',
+    observed:'Observado', significant:'Significativo', surface:'Superficie',
+    aboveBaseline:'Por encima de la línea base', belowBaseline:'Por debajo de la línea base',
+    securityAdvisory:'Aviso de Seguridad y Estabilidad',
+    alertBody:(loc,pct)=>`La inestabilidad regional está afectando a ${loc}. El desvío de rutas y las primas de seguro elevadas están empujando los costos hacia arriba ~${pct}%.`,
+    searchRegion:'Región', selectBtn:'Seleccionar', filterRegion:'Filtrar regiones — Mar Rojo, Pacífico, Atlántico…',
+    worldEvents:'Eventos Mundiales', routeViability:'Viabilidad de Rutas', activeCorridor:'Corredores Activos',
+    capeDiversion:'Desvío del Cabo', capeVal:'Activo +12d', panamaLimits:'Límites de Calado de Panamá', panamaVal:'Reducido −40%',
+    arcticNSR:'Estado NSR Ártico', arcticVal:'Abierto — Sin Hielo', checkPriceBtn:'Ver Impacto en Precios →',
+    integratedRisk:'Riesgo Integrado', tradeFlow:'Flujo Comercial', globalSec:'Seguridad Global', ecosystem:'Ecosistema',
+    kickerWallet:'Inteligencia de Precios', walletTitle:'Mercado de EE.UU.', walletTitleEm:'Predictor de Precios',
+    lookupSh:'Búsqueda de Artículos con IA', badgeTxt:(n)=>`🇺🇸 Precios del mercado EE.UU. · en vivo · ${n} materias primas`,
+    searchPlaceholder:(n)=>`Buscar entre ${n} materias primas, o escribe cualquier cosa…`,
+    livePrice:'Precio en Vivo', predictedPrice:'Precio Predicho', predictedSub:'Pronóstico 6 meses',
+    vsBaseline:'vs línea base', supplyChain:'Impacto en Cadena de Suministro', usMarket:'Contexto del Mercado EE.UU.',
+    origins:'Orígenes', keyRoutes:'Rutas Clave', maritimeSens:'Sensibilidad marítima',
+    stable:'Estable', volatile:'Volátil', critical:'Crítico',
+    routeStatusFilter:'Filtro de Estado de Rutas', allRoutes:'Todas las Rutas',
+    disrupted:'🔴 Interrumpida', restricted:'🟡 Restringida', elevatedRisk:'🟠 Riesgo Elevado',
+    congested:'🟠 Congestionada', operational:'🟢 Operacional', seasonal:'🔵 Estacional',
+    transit:'Tránsito:', volume:'Volumen:', region:'Región:', impact:'Impacto',
+    affectedComm:'Materias primas afectadas — clic para precio', altRouting:'Rutas alternativas',
+    scanning:'Escaneando condiciones marítimas…', depthReadFailed:'Lectura de profundidad fallida — señal perdida. Inténtalo de nuevo.',
+    footerBrand:'The Current · Sistemas de Información',
+    footerDesc:(n)=>`Análisis impulsado por IA combinado con modelado oceanográfico y geopolítico para predecir impactos en precios de materias primas de EE.UU. ${n} materias primas rastreadas en 6 corredores comerciales.`,
+    footerSrcTitle:'Fuentes de Datos y Citas', footerBar:(n)=>`${n} Materias Primas · 6 Rutas · Precios IA en Vivo`,
+    notFoundTitle:(q)=>`"${q}" no encontrado en la base de datos`,
+    notFoundBody:'Este artículo no parece ser una materia prima negociable con exposición de precio marítimo. The Current rastrea bienes enviados físicamente por rutas de carga oceánica.',
+    notFoundHint:(s)=>s?`¿Quisiste decir: `:'Prueba buscando: trigo, cobre, café, litio, petróleo crudo, semiconductores, algodón, caucho.',
+    usBaseline:'Base EE.UU.', stabilityReport:'Informe de Estabilidad',
+    searchLabel:'Buscar', threeMonth:'3 meses', moreSuggestions:(n)=>`+${n} más`,
+    routeGlobalKicker:'Corredores Comerciales Globales · Estado en Vivo', routeTitle:'Rutas Marítimas',
+  },
+  zh: {
+    brandSub:'海事智能平台', tabPulse:'脉冲', tabPrices:'价格', tabRoutes:'航线',
+    kickerDash:'全球海事情报', stabilityIndex:'稳定指数 · 实时',
+    surfaceTemp:'海面温度', waveHeight:'波浪高度', climateDelta:'气候偏差', windSpeed:'风速',
+    observed:'观测值', significant:'有效波高', surface:'海面',
+    aboveBaseline:'高于基准线', belowBaseline:'低于基准线',
+    securityAdvisory:'安全与稳定预警',
+    alertBody:(loc,pct)=>`${loc}地区局势不稳定，绕行和保险费用上涨，估计推高成本约${pct}%。`,
+    searchRegion:'搜索区域', selectBtn:'选择', filterRegion:'筛选地区 — 红海、太平洋、大西洋…',
+    worldEvents:'全球事件', routeViability:'航线可用性', activeCorridor:'活跃走廊',
+    capeDiversion:'好望角绕行', capeVal:'启用 +12天', panamaLimits:'巴拿马吃水限制', panamaVal:'减少 −40%',
+    arcticNSR:'北极NSR状态', arcticVal:'开放 — 无冰', checkPriceBtn:'查看价格影响 →',
+    integratedRisk:'综合风险', tradeFlow:'贸易流通', globalSec:'全球安全', ecosystem:'生态系统',
+    kickerWallet:'价格情报', walletTitle:'美国市场', walletTitleEm:'价格预测器',
+    lookupSh:'AI 商品查询', badgeTxt:(n)=>`🇺🇸 美国市场价格 · 实时跳动 · 追踪${n}种商品`,
+    searchPlaceholder:(n)=>`搜索${n}种商品，或输入任何内容进行AI查询…`,
+    livePrice:'实时价格', predictedPrice:'预测价格', predictedSub:'6个月预测',
+    vsBaseline:'相较基准', supplyChain:'供应链影响', usMarket:'美国市场背景',
+    origins:'产地', keyRoutes:'主要航线', maritimeSens:'海事敏感度',
+    stable:'稳定', volatile:'波动', critical:'危急',
+    routeStatusFilter:'航线状态筛选', allRoutes:'全部航线',
+    disrupted:'🔴 中断', restricted:'🟡 受限', elevatedRisk:'🟠 风险升高',
+    congested:'🟠 拥堵', operational:'🟢 正常运营', seasonal:'🔵 季节性',
+    transit:'路线：', volume:'吞吐量：', region:'区域：', impact:'影响',
+    affectedComm:'受影响商品 — 点击查看价格', altRouting:'备选航线',
+    scanning:'正在扫描海事状况…', depthReadFailed:'深度读取失败 — 信号丢失，请重试。',
+    footerBrand:'The Current · 信息系统',
+    footerDesc:(n)=>`AI驱动的分析结合海洋学和地缘政治建模，预测美国商品价格影响。追踪${n}种商品，覆盖6条主要贸易走廊。`,
+    footerSrcTitle:'数据来源与引用', footerBar:(n)=>`${n}种商品 · 6条航线 · AI实时定价`,
+    notFoundTitle:(q)=>`"${q}" 未在商品数据库中找到`,
+    notFoundBody:'该商品似乎不是具有海运价格敞口的可交易商品。The Current追踪通过海运航线实际运输的货物。',
+    notFoundHint:(s)=>s?`您是否是指: `:'请尝试搜索：小麦、铜、咖啡、锂、原油、半导体、棉花、橡胶等实物商品。',
+    usBaseline:'美国基准', stabilityReport:'稳定报告',
+    searchLabel:'搜索', threeMonth:'3个月', moreSuggestions:(n)=>`+${n} 更多`,
+    routeGlobalKicker:'全球贸易走廊 · 实时状态', routeTitle:'海上航线',
+  },
+};
+
+// ─── Commodity base data ──────────────────────────────────────────────────────
+const COMMODITIES = [
+  { id:'wheat',     name:'Wheat',           icon:'🌾', tags:['grain','food'],          unit:'bushel', basePrice:5.42,   sensitivity:0.55, origins:['Ukraine','Russia','US','Canada'],          routes:['Black Sea','Pacific North','North Atlantic'] },
+  { id:'corn',      name:'Corn',             icon:'🌽', tags:['grain','food'],          unit:'bushel', basePrice:4.62,   sensitivity:0.40, origins:['US (domestic)','Brazil','Argentina'],       routes:['Gulf of Mexico','Atlantic'] },
+  { id:'soybeans',  name:'Soybeans',         icon:'🫘', tags:['grain','food'],          unit:'bushel', basePrice:9.88,   sensitivity:0.50, origins:['US','Brazil','Argentina'],                  routes:['Atlantic','Pacific North'] },
+  { id:'rice',      name:'Rice',             icon:'🍚', tags:['grain','food'],          unit:'cwt',    basePrice:15.20,  sensitivity:0.65, origins:['Thailand','Vietnam','India'],               routes:['Indian Ocean','Equatorial Pacific'] },
+  { id:'barley',    name:'Barley',           icon:'🌿', tags:['grain','food'],          unit:'bushel', basePrice:4.18,   sensitivity:0.48, origins:['Australia','Canada','EU'],                  routes:['Black Sea','North Atlantic'] },
+  { id:'coffee',    name:'Arabica Coffee',   icon:'☕', tags:['beverage','food'],       unit:'lb',     basePrice:4.82,   sensitivity:0.82, origins:['Brazil','Colombia','Ethiopia'],             routes:['Atlantic','Gulf of Mexico'] },
+  { id:'cocoa',     name:'Cocoa',            icon:'🍫', tags:['food','tropical'],       unit:'lb',     basePrice:4.10,   sensitivity:0.78, origins:['Ivory Coast','Ghana','Ecuador'],            routes:['Atlantic'] },
+  { id:'sugar',     name:'Raw Sugar',        icon:'🍬', tags:['food','tropical'],       unit:'lb',     basePrice:0.195,  sensitivity:0.60, origins:['Brazil','India','Thailand'],               routes:['Atlantic','Gulf of Mexico'] },
+  { id:'avocado',   name:'Avocados',         icon:'🥑', tags:['produce','food'],        unit:'lb',     basePrice:1.55,   sensitivity:0.72, origins:['Mexico','Peru','Chile'],                   routes:['Equatorial Pacific','Gulf of Mexico'] },
+  { id:'copper',    name:'Copper',           icon:'🔶', tags:['metal','industrial'],    unit:'lb',     basePrice:4.48,   sensitivity:0.88, origins:['Chile','Peru','DRC'],                      routes:['Pacific North','Gulf of Mexico'] },
+  { id:'aluminum',  name:'Aluminum',         icon:'🥈', tags:['metal','industrial'],    unit:'lb',     basePrice:1.12,   sensitivity:0.70, origins:['Middle East','Australia','Canada'],         routes:['Indian Ocean','Pacific North'] },
+  { id:'steel',     name:'Steel (HRC)',      icon:'⚙️',  tags:['metal','industrial'],    unit:'ton',    basePrice:780.00, sensitivity:0.60, origins:['Brazil','South Korea','US domestic'],      routes:['Atlantic','Pacific North'] },
+  { id:'lithium',   name:'Lithium',          icon:'⚡', tags:['metal','energy'],        unit:'kg',     basePrice:11.20,  sensitivity:0.90, origins:['Chile','Australia','Argentina'],            routes:['Pacific North'] },
+  { id:'chips',     name:'Semiconductors',   icon:'💻', tags:['tech','industrial'],     unit:'unit',   basePrice:115.00, sensitivity:0.95, origins:['Taiwan','South Korea','Netherlands'],       routes:['Equatorial Pacific','Pacific North'] },
+  { id:'crude_oil', name:'Crude Oil (WTI)',  icon:'🛢️',  tags:['energy'],               unit:'barrel', basePrice:76.20,  sensitivity:0.85, origins:['US Gulf Coast','Saudi Arabia','Iraq'],     routes:['Gulf of Mexico','Indian Ocean','Red Sea Corridor'] },
+  { id:'lng',       name:'LNG',              icon:'🔥', tags:['energy'],               unit:'MMBtu',  basePrice:3.65,   sensitivity:0.75, origins:['US Gulf Coast','Qatar','Australia'],        routes:['Atlantic','Pacific North'] },
+  { id:'fuel',      name:'Marine Gas Oil',   icon:'⛽', tags:['energy'],               unit:'gallon', basePrice:3.08,   sensitivity:0.62, origins:['US Gulf Coast','Rotterdam','Singapore'],    routes:['Gulf of Mexico','Indian Ocean'] },
+  { id:'timber',    name:'Timber',           icon:'🌲', tags:['materials'],            unit:'MBF',    basePrice:510.00, sensitivity:0.45, origins:['Canada','Sweden','Malaysia'],               routes:['Pacific North','North Atlantic'] },
+  { id:'cotton',    name:'Cotton',           icon:'🧵', tags:['textile','materials'],   unit:'lb',     basePrice:0.76,   sensitivity:0.68, origins:['US','India','Brazil'],                     routes:['Indian Ocean','Atlantic'] },
+  { id:'rubber',    name:'Natural Rubber',   icon:'⭕', tags:['materials','industrial'],unit:'lb',     basePrice:0.69,   sensitivity:0.80, origins:['Thailand','Indonesia','Vietnam'],           routes:['Indian Ocean','Equatorial Pacific'] },
+];
+
+const REGIONS = {
+  'Pacific North':      { sst:14.2, waves:2.1, wind:18.5, anomaly:-0.2, stability:0.95 },
+  'Equatorial Pacific': { sst:28.4, waves:3.8, wind:14.2, anomaly:0.85, stability:0.88 },
+  'North Atlantic':     { sst:12.1, waves:5.4, wind:22.1, anomaly:1.1,  stability:0.92 },
+  'Indian Ocean':       { sst:26.5, waves:1.9, wind:10.5, anomaly:0.45, stability:0.65 },
+  'Gulf of Mexico':     { sst:24.8, waves:1.2, wind:12.0, anomaly:0.9,  stability:0.98 },
+  'Red Sea Corridor':   { sst:29.1, waves:0.8, wind:11.2, anomaly:0.7,  stability:0.30 },
+};
+const REGION_NAMES = Object.keys(REGIONS);
+
+const ROUTE_STATUS_COLORS = {
+  critical:  { border:'#991b1b', color:'#ef4444', bg:'rgba(239,68,68,0.08)' },
+  reduced:   { border:'#9e6e1e', color:'#e8a84a', bg:'rgba(232,168,74,0.08)' },
+  elevated:  { border:'#9e6e1e', color:'#e8a84a', bg:'rgba(232,168,74,0.06)' },
+  congested: { border:'#9e6e1e', color:'#e8a84a', bg:'rgba(232,168,74,0.06)' },
+  normal:    { border:'#0a7a6c', color:'#12b5a0', bg:'rgba(18,181,160,0.06)' },
+  seasonal:  { border:'#0094b8', color:'#00d4ff', bg:'rgba(0,212,255,0.06)' },
+};
+
+// ─── Price engine ─────────────────────────────────────────────────────────────
+function calcPrice(commodity, sea, noiseOffset = 0) {
+  const c = 1 + (sea.anomaly * commodity.sensitivity * 0.10);
+  const s = 1 + ((1 - sea.stability) * commodity.sensitivity * 0.22);
+  const w = 1 + (Math.max(0, sea.waves - 2.5) * commodity.sensitivity * 0.04);
+  const noise = 1 + noiseOffset * commodity.sensitivity * 0.004;
+  const currentPrice = commodity.basePrice * c * s * w * noise;
+  return { ...commodity, currentPrice, priceShift: currentPrice - commodity.basePrice, shiftPercent: ((currentPrice - commodity.basePrice) / commodity.basePrice) * 100 };
+}
+
+function calcForecast(commodity, sea) {
+  const base = commodity.basePrice;
+  const current = calcPrice(commodity, sea).currentPrice;
+  const persistence = 1 - sea.stability * 0.3;
+  const shift = (current - base) / base;
+  let fp = current;
+  const months = [];
+  for (let i = 1; i <= 6; i++) {
+    fp = Math.max(base * 0.55, fp + (base - fp) * 0.12 * (1 - persistence * 0.5) + fp * shift * 0.02 * persistence + (Math.random() - 0.48) * base * 0.022);
+    months.push(fp);
+  }
+  return { threeMonth: months[2], sixMonth: months[5] };
+}
+
+async function lookupCustomItem(query, sea, loc) {
+  const prompt = `US commodity pricing analyst. Respond ONLY with raw JSON, no markdown, no preamble.
+Item: "${query}"
+Maritime: ${loc} | Stability ${Math.round(sea.stability*100)}% | SST ${sea.anomaly>0?'+':''}${sea.anomaly.toFixed(2)}°C | Waves ${sea.waves.toFixed(1)}m
+{"name":"","icon":"","unit":"","basePrice":0,"sensitivity":0,"supplyRoute":"1-2 sentences on maritime supply chain impact.","context":"1 sentence on US market context.","origins":[""],"routes":[""]}
+If NOT a real ocean-shipped commodity return only: {"notCommodity":true}
+Use accurate early-2026 US market prices.`;
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ model:'claude-haiku-4-5-20251001', max_tokens:350, messages:[{role:'user',content:prompt}] }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = await r.json();
+  if (d.error) throw new Error(d.error.message);
+  const txt = d.content?.find(b=>b.type==='text')?.text || '';
+  return JSON.parse(txt.replace(/```json|```/gi,'').trim());
+}
+
+// ─── Marine life ──────────────────────────────────────────────────────────────
+function TropicalFish({ scale=1, color='#00d4ff', opacity=0.15, flipped=false }) {
+  return (
+    <svg width={55*scale} height={26*scale} viewBox="0 0 55 26" style={{transform:flipped?'scaleX(-1)':'none',display:'block'}}>
+      <ellipse cx="27" cy="13" rx="18" ry="9" fill={color} opacity={opacity+0.05}/>
+      <ellipse cx="27" cy="13" rx="14" ry="6" fill={color} opacity={opacity*0.4}/>
+      <polygon points="9,13 0,4 0,22" fill={color} opacity={opacity}/>
+      <polygon points="21,4 27,0 33,4" fill={color} opacity={opacity*0.7}/>
+      <polygon points="21,22 27,26 33,22" fill={color} opacity={opacity*0.7}/>
+      <circle cx="40" cy="10" r="2.2" fill={color} opacity={opacity+0.3}/>
+      <circle cx="41" cy="9.5" r="0.8" fill="rgba(0,0,0,0.5)"/>
+    </svg>
+  );
+}
+function SlimFish({ scale=1, color='#12b5a0', opacity=0.13, flipped=false }) {
+  return (
+    <svg width={70*scale} height={18*scale} viewBox="0 0 70 18" style={{transform:flipped?'scaleX(-1)':'none',display:'block'}}>
+      <ellipse cx="38" cy="9" rx="26" ry="6" fill={color} opacity={opacity+0.04}/>
+      <polygon points="12,9 0,3 0,15" fill={color} opacity={opacity}/>
+      <circle cx="57" cy="7" r="1.8" fill={color} opacity={opacity+0.35}/>
+      <circle cx="57.7" cy="6.6" r="0.65" fill="rgba(0,0,0,0.5)"/>
+    </svg>
+  );
+}
+function Shark({ scale=1, opacity=0.11, flipped=false }) {
+  const c='#5fa8c0';
+  return (
+    <svg width={110*scale} height={38*scale} viewBox="0 0 110 38" style={{transform:flipped?'scaleX(-1)':'none',display:'block'}}>
+      <ellipse cx="52" cy="20" rx="44" ry="12" fill={c} opacity={opacity+0.04}/>
+      <polygon points="8,20 0,6 2,20 0,34" fill={c} opacity={opacity}/>
+      <polygon points="52,8 60,0 70,8" fill={c} opacity={opacity+0.03}/>
+      <polygon points="45,22 38,32 58,22" fill={c} opacity={opacity*0.8}/>
+      <circle cx="87" cy="17" r="2.5" fill={c} opacity={opacity+0.4}/>
+      <circle cx="87.8" cy="16.4" r="1" fill="rgba(0,0,0,0.7)"/>
+    </svg>
+  );
+}
+function Jellyfish({ scale=1, color='#a78bfa', opacity=0.09 }) {
+  return (
+    <svg width={30*scale} height={44*scale} viewBox="0 0 30 44" style={{display:'block'}}>
+      <ellipse cx="15" cy="13" rx="13" ry="11" fill={color} opacity={opacity+0.05}/>
+      <ellipse cx="15" cy="16" rx="13" ry="5" fill={color} opacity={opacity*0.5}/>
+      <path d="M8,22 Q6,32 8,42" stroke={color} strokeWidth="1" fill="none" opacity={opacity+0.04}/>
+      <path d="M15,24 Q15,34 14,44" stroke={color} strokeWidth="0.8" fill="none" opacity={opacity*0.9}/>
+      <path d="M22,22 Q24,32 22,42" stroke={color} strokeWidth="1" fill="none" opacity={opacity+0.04}/>
+      <ellipse cx="15" cy="11" rx="7" ry="6" fill={color} opacity={opacity*0.3}/>
+    </svg>
+  );
+}
+function MarineLayer() {
+  const creatures = useMemo(() => {
+    const pal = ['#00d4ff','#12b5a0','#0094b8','#4dd9f0','#38bdf8'];
+    const items = [];
+    for(let i=0;i<6;i++) items.push({id:`t${i}`,type:'tropical',color:pal[i%pal.length],goRight:Math.random()>0.5,scale:0.45+Math.random()*0.9,top:8+Math.random()*82,dur:22+Math.random()*30,delay:-(Math.random()*60),opacity:0.07+Math.random()*0.10,wob:1.5+Math.random()*2});
+    for(let i=0;i<4;i++) items.push({id:`s${i}`,type:'slim',color:pal[i%pal.length],goRight:Math.random()>0.5,scale:0.5+Math.random()*0.7,top:5+Math.random()*88,dur:28+Math.random()*38,delay:-(Math.random()*70),opacity:0.08+Math.random()*0.09,wob:2+Math.random()*2.5});
+    for(let i=0;i<2;i++) items.push({id:`sh${i}`,type:'shark',goRight:i===0,scale:0.55+Math.random()*0.35,top:55+Math.random()*35,dur:65+Math.random()*50,delay:-(Math.random()*100),opacity:0.06+Math.random()*0.06,wob:4+Math.random()*3});
+    for(let i=0;i<3;i++) items.push({id:`j${i}`,type:'jellyfish',color:['#a78bfa','#c4b5fd','#818cf8'][i],goRight:Math.random()>0.5,scale:0.5+Math.random()*0.7,top:10+Math.random()*75,dur:48+Math.random()*55,delay:-(Math.random()*90),opacity:0.05+Math.random()*0.07,wob:5+Math.random()*4});
+    return items;
+  },[]);
+  return (
+    <div style={{position:'fixed',inset:0,pointerEvents:'none',zIndex:0,overflow:'hidden'}}>
+      {creatures.map(f=>(
+        <div key={f.id} style={{position:'absolute',top:`${f.top}%`,animation:`fish-swim-${f.goRight?'r':'l'} ${f.dur}s linear ${f.delay}s infinite`}}>
+          <div style={{animation:`${f.type==='jellyfish'?'jelly-pulse':'fish-wobble'} ${f.wob}s ease-in-out infinite`}}>
+            {f.type==='tropical' && <TropicalFish scale={f.scale} color={f.color} opacity={f.opacity} flipped={!f.goRight}/>}
+            {f.type==='slim'     && <SlimFish     scale={f.scale} color={f.color} opacity={f.opacity} flipped={!f.goRight}/>}
+            {f.type==='shark'    && <Shark        scale={f.scale}                 opacity={f.opacity} flipped={!f.goRight}/>}
+            {f.type==='jellyfish'&& <Jellyfish    scale={f.scale} color={f.color} opacity={f.opacity}/>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+function WaveDivider({ flip=false }) {
+  return (
+    <div style={{lineHeight:0,transform:flip?'scaleY(-1)':'none',marginTop:flip?'-1px':0}}>
+      <svg viewBox="0 0 1440 60" xmlns="http://www.w3.org/2000/svg" style={{width:'100%',display:'block'}}>
+        <path fill="rgba(6,28,48,0.7)" d="M0,30 C180,55 360,5 540,30 C720,55 900,5 1080,30 C1260,55 1380,15 1440,30 L1440,60 L0,60 Z">
+          <animate attributeName="d" values="M0,30 C180,55 360,5 540,30 C720,55 900,5 1080,30 C1260,55 1380,15 1440,30 L1440,60 L0,60 Z;M0,20 C180,5 360,50 540,20 C720,5 900,50 1080,20 C1260,5 1380,45 1440,20 L1440,60 L0,60 Z;M0,30 C180,55 360,5 540,30 C720,55 900,5 1080,30 C1260,55 1380,15 1440,30 L1440,60 L0,60 Z" dur="12s" repeatCount="indefinite"/>
+        </path>
+      </svg>
+    </div>
+  );
+}
+
+// ─── StatCell with hover tooltip ──────────────────────────────────────────────
+function StatCell({ icon, lbl, val, unit, sub, explain }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  return (
+    <div className="depth-stat" ref={ref} style={{position:'relative'}}>
+      <div className="depth-icon">{icon}</div>
+      <div style={{display:'flex',alignItems:'center',gap:5}}>
+        <div className="depth-lbl">{lbl}</div>
+        <button onClick={()=>setOpen(o=>!o)} title="Why does this matter?"
+          style={{background:'none',border:'none',cursor:'pointer',padding:0,display:'flex',alignItems:'center',color:open?'var(--bio)':'var(--foam3)',transition:'color 0.15s'}}>
+          <Info size={10}/>
+        </button>
+      </div>
+      <div className="depth-val">{val}<span className="depth-unit">{unit}</span></div>
+      <div className="depth-sub">{sub}</div>
+      {open && explain && (
+        <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,zIndex:80,width:260,background:'var(--deep)',border:'1px solid var(--rule2)',padding:'12px 14px',boxShadow:'0 8px 32px rgba(0,0,0,0.7)',animation:'fade-up 0.18s ease'}}>
+          <div style={{position:'absolute',top:-5,left:14,width:8,height:8,background:'var(--deep)',border:'1px solid var(--rule2)',transform:'rotate(45deg)',borderBottom:'none',borderRight:'none'}}/>
+          <div style={{fontSize:7.5,letterSpacing:'0.22em',textTransform:'uppercase',color:'var(--bio)',marginBottom:7,fontFamily:'var(--sans)'}}>{explain.why}</div>
+          <div style={{fontSize:10.5,color:'var(--foam2)',lineHeight:1.65,fontFamily:'var(--sans)'}}>{explain.body}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── CSS ──────────────────────────────────────────────────────────────────────
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=DM+Mono:wght@300;400&family=Noto+Sans+SC:wght@300;400&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --abyss:#020d18;--deep:#061c30;--mid:#0a2d47;
+    --foam:#e8f4f8;--foam2:#a8ccd8;--foam3:#6a9db0;
+    --bio:#00d4ff;--bio2:#0094b8;--bio3:#005a73;
+    --teal:#12b5a0;--teal2:#0a7a6c;--amber:#e8a84a;--amber2:#9e6e1e;
+    --up:#22c55e;--dn:#ef4444;--dn2:#991b1b;
+    --rule:rgba(0,212,255,0.10);--rule2:rgba(0,212,255,0.22);--rule3:rgba(0,212,255,0.38);
+    --sans:'DM Mono',monospace;--serif:'Cormorant Garamond',Georgia,serif;
+  }
+  html{scroll-behavior:smooth}
+  body{background:var(--abyss);font-family:var(--sans);color:var(--foam);-webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(ellipse 90% 55% at 15% 0%,rgba(10,45,71,0.95) 0%,transparent 65%),radial-gradient(ellipse 70% 45% at 85% 100%,rgba(0,148,184,0.10) 0%,transparent 55%)}
+  body.zh{font-family:'Noto Sans SC','DM Mono',monospace}
+
+  @keyframes fish-swim-r{0%{transform:translateX(-200px)}100%{transform:translateX(calc(100vw + 200px))}}
+  @keyframes fish-swim-l{0%{transform:translateX(calc(100vw + 200px))}100%{transform:translateX(-200px)}}
+  @keyframes fish-wobble{0%,100%{transform:translateY(0)}50%{transform:translateY(6px)}}
+  @keyframes jelly-pulse{0%,100%{transform:translateY(0) scaleX(1)}25%{transform:translateY(-8px) scaleX(0.96)}75%{transform:translateY(8px) scaleX(1.04)}}
+  @keyframes sonar-ring{0%{transform:scale(0.2);opacity:0.9}100%{transform:scale(2.4);opacity:0}}
+  @keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.3;transform:scale(0.7)}}
+  @keyframes card-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes flash-gn{0%,100%{background:transparent}30%{background:rgba(34,197,94,0.14)}}
+  @keyframes flash-rd{0%,100%{background:transparent}30%{background:rgba(239,68,68,0.14)}}
+  @keyframes pred-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes fade-up{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes aura-pulse{0%,100%{transform:scale(1);opacity:0.7}50%{transform:scale(1.18);opacity:1}}
+
+  .nav{position:sticky;top:0;z-index:100;background:rgba(2,13,24,0.95);backdrop-filter:blur(16px);border-bottom:1px solid var(--rule2)}
+  .nav-inner{max-width:1200px;margin:0 auto;padding:0 1.5rem;height:64px;display:flex;align-items:center;gap:0;overflow:hidden}
+  .brand{display:flex;align-items:center;gap:10px;flex-shrink:0;margin-right:auto;cursor:pointer;transition:opacity 0.15s}
+  .brand:hover{opacity:0.72}
+  .brand-icon{display:flex;align-items:center;justify-content:center;width:38px;height:38px;border:1px solid var(--rule2);background:rgba(0,212,255,0.06);flex-shrink:0}
+  .brand-name{font-family:var(--serif);font-size:22px;font-weight:300;letter-spacing:0.22em;text-transform:uppercase;color:var(--foam);line-height:1;white-space:nowrap}
+  .brand-name span{color:var(--bio)}
+  .nav-center{display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .tab{font-size:8.5px;letter-spacing:0.18em;text-transform:uppercase;padding:8px 14px;background:none;border:none;border-bottom:2px solid transparent;color:var(--foam2);cursor:pointer;font-family:inherit;transition:color 0.15s,border-color 0.15s;white-space:nowrap}
+  .tab:hover{color:var(--foam)}.tab.on{color:var(--bio);border-bottom-color:var(--bio)}
+  .nav-right{display:flex;align-items:center;gap:10px;flex-shrink:0;margin-left:auto}
+  .lang-switcher{display:flex;align-items:center;gap:1px;border:1px solid var(--rule2);padding:2px;flex-shrink:0}
+  .lang-btn{font-size:8px;letter-spacing:0.12em;text-transform:uppercase;padding:4px 8px;background:none;border:none;color:var(--foam2);cursor:pointer;font-family:inherit;transition:all 0.15s;white-space:nowrap}
+  .lang-btn:hover{color:var(--foam)}.lang-btn.active{background:var(--bio3);color:var(--bio)}
+  .nav-loc{display:flex;align-items:center;gap:4px;font-size:8.5px;letter-spacing:0.12em;text-transform:uppercase;color:var(--foam2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}
+
+  .page{max-width:1200px;margin:0 auto;padding:2.5rem 2rem 4rem;position:relative;z-index:1}
+  .masthead{display:grid;grid-template-columns:1fr auto;gap:2rem;align-items:end;padding-bottom:2rem;border-bottom:1px solid var(--rule2)}
+  .kicker{font-size:8.5px;letter-spacing:0.3em;text-transform:uppercase;color:var(--bio);margin-bottom:0.85rem;display:flex;align-items:center;gap:10px}
+  .kicker::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--rule3),transparent)}
+  .headline{font-family:var(--serif);font-size:clamp(36px,4.5vw,58px);font-weight:300;line-height:0.95;color:var(--foam)}
+  .headline em{color:var(--bio);font-style:italic}
+  .stab-box{text-align:right;flex-shrink:0}
+  .stab-num{font-family:var(--serif);font-size:66px;font-weight:300;line-height:1;letter-spacing:-0.02em}
+  .stab-num.crit{color:var(--dn)}.stab-num.vol{color:var(--amber)}.stab-num.ok{color:var(--teal)}
+  .stab-lbl{font-size:7.5px;letter-spacing:0.26em;text-transform:uppercase;color:var(--foam2);margin-top:4px}
+  .stab-tag{display:inline-block;margin-top:6px;font-size:8px;letter-spacing:0.16em;text-transform:uppercase;padding:3px 10px;border:1px solid}
+  .stab-tag.crit{border-color:var(--dn2);color:var(--dn)}.stab-tag.vol{border-color:var(--amber2);color:var(--amber)}.stab-tag.ok{border-color:var(--teal2);color:var(--teal)}
+
+  .depth-band{background:linear-gradient(180deg,var(--deep),var(--mid));border-top:1px solid var(--rule2);border-bottom:1px solid var(--rule2);position:relative;overflow:hidden}
+  .depth-band::before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(180deg,transparent 0px,transparent 18px,rgba(0,212,255,0.025) 18px,rgba(0,212,255,0.025) 19px);pointer-events:none}
+  .depth-inner{max-width:1200px;margin:0 auto;padding:0 2rem;display:grid;grid-template-columns:repeat(4,1fr)}
+  .depth-stat{padding:1.1rem 0 1.1rem 1.25rem;border-right:1px solid var(--rule);display:flex;flex-direction:column;gap:4px}
+  .depth-stat:first-child{padding-left:0}.depth-stat:last-child{border-right:none}
+  .depth-icon{color:var(--bio2);margin-bottom:2px}
+  .depth-lbl{font-size:7px;letter-spacing:0.24em;text-transform:uppercase;color:var(--foam2);opacity:0.7}
+  .depth-val{font-family:var(--serif);font-size:26px;font-weight:300;line-height:1;color:var(--foam)}
+  .depth-unit{font-size:11px;color:var(--foam2);margin-left:2px}.depth-sub{font-size:9px;color:var(--bio2)}
+
+  .alert{border-left:2px solid var(--dn);background:rgba(139,32,32,0.12);padding:0.9rem 1.1rem;display:flex;gap:1rem;align-items:flex-start;margin-bottom:2rem}
+  .alert-title{font-size:8px;letter-spacing:0.22em;text-transform:uppercase;color:var(--dn);margin-bottom:4px}
+  .alert-body{font-size:11px;color:var(--foam2);line-height:1.6}
+  .alert-close{margin-left:auto;background:none;border:none;color:var(--foam2);cursor:pointer;font-size:18px;line-height:1;flex-shrink:0;padding:2px 4px}
+
+  .region-wrap{position:relative;margin-bottom:1.75rem}
+  .region-form{display:flex;border:1px solid var(--rule2);background:rgba(6,28,48,0.6);transition:border-color 0.15s}
+  .region-form:focus-within{border-color:var(--bio2)}
+  .region-label{padding:0 0.9rem;font-size:8px;letter-spacing:0.18em;text-transform:uppercase;color:var(--bio);display:flex;align-items:center;border-right:1px solid var(--rule);white-space:nowrap;gap:5px;flex-shrink:0}
+  .region-form input{flex:1;background:transparent;border:none;color:var(--foam);font-family:inherit;font-size:12px;padding:10px 12px;outline:none;min-width:0}
+  .region-form input::placeholder{color:var(--foam2);opacity:0.4}
+  .region-clear{background:none;border:none;border-left:1px solid var(--rule);color:var(--foam2);padding:0 10px;cursor:pointer;display:flex;align-items:center;flex-shrink:0}
+  .region-btn{background:var(--bio3);border:none;cursor:pointer;padding:0 16px;color:var(--bio);font-family:inherit;font-size:8px;letter-spacing:0.16em;text-transform:uppercase;transition:background 0.15s;white-space:nowrap;flex-shrink:0}
+  .region-btn:hover{background:#1a5f8a;color:var(--foam)}
+  .region-dropdown{position:absolute;top:calc(100% + 2px);left:0;right:0;background:var(--deep);border:1px solid var(--rule2);z-index:50;box-shadow:0 8px 32px rgba(0,0,0,0.5)}
+  .region-option{padding:9px 13px;cursor:pointer;font-size:11px;color:var(--foam);transition:background 0.1s;border-bottom:1px solid var(--rule);display:flex;align-items:center;justify-content:space-between;gap:1rem}
+  .region-option:last-child{border-bottom:none}.region-option:hover,.region-option.hi{background:rgba(0,212,255,0.07)}
+  .region-opt-name{flex:1;min-width:0}.region-opt-stab{font-size:9px;flex-shrink:0;white-space:nowrap}
+
+  .sh{display:flex;align-items:center;gap:1rem;margin-bottom:1.1rem}
+  .sh-lbl{font-size:8px;letter-spacing:0.26em;text-transform:uppercase;color:var(--bio);white-space:nowrap}
+  .sh-rule{flex:1;height:1px;background:linear-gradient(90deg,var(--rule2),transparent)}
+
+  .cols{display:grid;grid-template-columns:1fr 290px;gap:2.5rem}
+  .event{padding:1.25rem 0;border-bottom:1px solid var(--rule);display:grid;grid-template-columns:28px 1fr auto;gap:1rem;align-items:start}
+  .event:first-child{border-top:1px solid var(--rule)}
+  .ev-num{font-family:var(--serif);font-size:24px;font-weight:300;color:var(--rule2);line-height:1}
+  .ev-meta{display:flex;gap:7px;align-items:center;margin-bottom:5px;flex-wrap:wrap}
+  .ev-type{font-size:7.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--foam2);opacity:0.7}
+  .ev-loc{font-size:7.5px;letter-spacing:0.12em;text-transform:uppercase;color:var(--bio2)}
+  .ev-title{font-family:var(--serif);font-size:18px;font-weight:400;color:var(--foam);line-height:1.15;margin-bottom:5px}
+  .ev-desc{font-size:11px;color:var(--foam2);line-height:1.65}
+  .badge{font-size:7px;letter-spacing:0.12em;text-transform:uppercase;padding:3px 8px;border:1px solid;white-space:nowrap;flex-shrink:0}
+  .badge.crit{border-color:var(--dn2);color:var(--dn)}.badge.high{border-color:var(--amber2);color:var(--amber)}.badge.med{border-color:var(--teal2);color:var(--teal)}
+
+  .sidebar{display:flex;flex-direction:column;gap:1.5rem}
+  .panel{border:1px solid var(--rule2);background:rgba(6,28,48,0.5)}
+  .panel-head{padding:0.8rem 1rem;border-bottom:1px solid var(--rule);display:flex;align-items:center;justify-content:space-between;gap:0.5rem}
+  .panel-title{font-size:8px;letter-spacing:0.22em;text-transform:uppercase;color:var(--bio)}
+  .panel-row{padding:0.7rem 1rem;border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;align-items:center;gap:0.75rem}
+  .panel-row:last-child{border-bottom:none}
+  .panel-lbl{font-size:10.5px;color:var(--foam2);flex:1;min-width:0}.panel-val{font-size:9.5px;text-align:right;flex-shrink:0;white-space:nowrap}
+  .val-dn{color:var(--dn)}.val-amber{color:var(--amber)}.val-teal{color:var(--teal)}
+  .panel-cta{display:block;width:100%;padding:10px;background:transparent;border:none;border-top:1px solid var(--rule);color:var(--bio);font-family:inherit;font-size:8px;letter-spacing:0.16em;text-transform:uppercase;cursor:pointer;transition:background 0.15s;text-align:center}
+  .panel-cta:hover{background:rgba(0,212,255,0.06)}
+  .risk-block{padding:0.85rem 1rem;border-bottom:1px solid var(--rule)}.risk-block:last-child{border-bottom:none}
+  .risk-lbl{font-size:7.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--bio2);margin-bottom:3px}
+  .risk-txt{font-size:11px;color:var(--foam);line-height:1.55}
+
+  .ocean-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--rule2);font-size:8px;letter-spacing:0.10em;text-transform:uppercase;color:var(--bio);margin-bottom:0.85rem;background:rgba(0,212,255,0.04)}
+  .pulse-dot{width:6px;height:6px;border-radius:50%;background:var(--bio);animation:pulse-dot 2s ease-in-out infinite;flex-shrink:0}
+  .search-wrap{position:relative}
+  .search-row{display:flex;border:1px solid var(--rule2);background:rgba(6,28,48,0.7);transition:border-color 0.15s}
+  .search-row:focus-within{border-color:var(--bio2);box-shadow:0 0 0 1px rgba(0,212,255,0.12)}
+  .search-row input{flex:1;background:transparent;border:none;color:var(--foam);font-family:inherit;font-size:12px;padding:13px 14px;outline:none;min-width:0}
+  .search-row input::placeholder{color:var(--foam2);opacity:0.4}
+  .search-clear{background:none;border:none;border-left:1px solid var(--rule);color:var(--foam2);padding:0 12px;cursor:pointer;display:flex;align-items:center;flex-shrink:0}
+  .search-go{background:var(--bio3);border:none;cursor:pointer;padding:0 18px;color:var(--bio);font-family:inherit;font-size:8.5px;letter-spacing:0.14em;text-transform:uppercase;transition:background 0.15s;display:flex;align-items:center;gap:6px;border-left:1px solid var(--rule2);white-space:nowrap;flex-shrink:0}
+  .search-go:hover{background:#1a5f8a;color:var(--foam)}.search-go:disabled{opacity:0.4;cursor:not-allowed}
+  .suggestions{position:absolute;top:calc(100% + 2px);left:0;right:0;background:var(--deep);border:1px solid var(--rule2);z-index:50;max-height:220px;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.5)}
+  .suggestion{display:flex;align-items:center;gap:9px;padding:9px 13px;cursor:pointer;transition:background 0.1s;border-bottom:1px solid var(--rule)}
+  .suggestion:last-child{border-bottom:none}.suggestion:hover,.suggestion.hi{background:rgba(0,212,255,0.07)}
+  .sug-icon{font-size:14px;flex-shrink:0}.sug-name{font-size:11.5px;color:var(--foam)}.sug-tags{font-size:8.5px;color:var(--foam2);opacity:0.6}
+
+  .sonar-wrap{border:1px solid var(--rule2);padding:2.5rem;display:flex;flex-direction:column;align-items:center;gap:14px;margin-top:1rem;background:rgba(6,28,48,0.6)}
+  .sonar{position:relative;width:52px;height:52px}
+  .sonar-ring{position:absolute;inset:0;border-radius:50%;border:1px solid var(--bio);opacity:0;animation:sonar-ring 1.6s ease-out infinite}
+  .sonar-ring:nth-child(2){animation-delay:0.55s}.sonar-ring:nth-child(3){animation-delay:1.1s}
+  .sonar-center{position:absolute;top:50%;left:50%;width:7px;height:7px;border-radius:50%;background:var(--bio);transform:translate(-50%,-50%);box-shadow:0 0 10px var(--bio)}
+  .sonar-txt{font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--bio)}
+
+  .err-card{border:1px solid var(--dn2);padding:0.9rem 1.1rem;margin-top:0.75rem;font-size:11px;color:var(--dn);line-height:1.6;display:flex;gap:9px;align-items:flex-start}
+  .unknown-card{border:1px solid var(--bio3);padding:1.1rem;margin-top:0.75rem;background:rgba(0,212,255,0.04)}
+  .unknown-card-title{font-size:11.5px;color:var(--bio);margin-bottom:7px;display:flex;align-items:flex-start;gap:7px;flex-wrap:wrap}
+  .unknown-card-body{font-size:10.5px;color:var(--foam2);line-height:1.6;margin-bottom:7px}
+  .unknown-card-hint{font-size:9.5px;color:var(--foam3);line-height:1.6}
+
+  .result-card{border:1px solid var(--rule2);margin-top:0.75rem;animation:card-in 0.3s ease;background:linear-gradient(180deg,rgba(10,45,71,0.9),rgba(6,28,48,0.95));position:relative;overflow:hidden}
+  .result-card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--bio),transparent);opacity:0.5}
+
+  .price-header{padding:1.1rem 1.2rem;border-bottom:1px solid var(--rule)}
+  .price-top-row{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:1rem;flex-wrap:wrap}
+  .price-meta{flex:1;min-width:0}
+  .price-name{font-family:var(--serif);font-size:21px;font-weight:400;color:var(--foam);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .price-base{font-size:9px;color:var(--foam2);margin-top:2px;opacity:0.8}
+  .prices-cols{display:flex;gap:0;border:1px solid var(--rule);overflow:hidden}
+  .price-col{display:flex;flex-direction:column;padding:0.85rem 1rem;border-right:1px solid var(--rule);flex:1;min-width:0}
+  .price-col:last-child{border-right:none}
+  .price-col-label{font-size:7.5px;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:5px;display:flex;align-items:center;gap:5px;white-space:nowrap}
+  .live-dot{width:5px;height:5px;border-radius:50%;background:var(--bio);animation:pulse-dot 1.4s ease-in-out infinite;flex-shrink:0}
+  .price-big{font-family:var(--serif);font-size:32px;font-weight:300;line-height:1;transition:color 0.4s}
+  .price-big.flash-up{animation:flash-gn 0.5s ease}.price-big.flash-dn{animation:flash-rd 0.5s ease}
+  .price-shift{font-size:9.5px;margin-top:4px;display:flex;align-items:center;gap:4px}
+  .predicted-label{font-size:7.5px;letter-spacing:0.2em;text-transform:uppercase;color:var(--foam2);margin-bottom:5px;display:flex;align-items:center;gap:5px;opacity:0.85}
+  .predicted-big{font-family:var(--serif);font-size:32px;font-weight:300;line-height:1;animation:pred-in 0.4s ease 0.15s both}
+  .predicted-sub{font-size:8.5px;color:var(--foam3);margin-top:4px}
+  .pred-range{font-size:8px;color:var(--foam3);margin-top:2px;opacity:0.7}
+
+  .result-notes{padding:0.9rem 1.2rem;border-bottom:1px solid var(--rule);display:flex;flex-direction:column;gap:10px}
+  .note-lbl{font-size:7.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--bio2);display:block;margin-bottom:2px}
+  .note-txt{font-size:11px;color:var(--foam2);line-height:1.65}
+  .origin-row{padding:0.75rem 1.2rem;border-bottom:1px solid var(--rule);display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap}
+  .origin-lbl{font-size:7.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--foam3);flex-shrink:0;padding-top:3px}
+  .origin-tag{font-size:8.5px;padding:2px 7px;border:1px solid var(--rule2);color:var(--foam2)}
+  .sens-row{padding:0.85rem 1.2rem;display:flex;align-items:center;gap:10px}
+  .sens-lbl{font-size:8px;letter-spacing:0.10em;text-transform:uppercase;color:var(--foam2);white-space:nowrap;opacity:0.7}
+  .sens-track{flex:1;height:2px;background:var(--rule2);min-width:0}
+  .sens-fill{height:100%;background:linear-gradient(90deg,var(--bio3),var(--bio));transition:width 0.6s ease}
+  .sens-pct{font-size:9.5px;color:var(--bio);min-width:30px;text-align:right;flex-shrink:0}
+
+  .routes-filter{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:1.5rem}
+  .filter-btn{font-size:8px;letter-spacing:0.13em;text-transform:uppercase;padding:5px 12px;background:transparent;border:1px solid var(--rule2);color:var(--foam2);cursor:pointer;font-family:inherit;transition:all 0.15s}
+  .filter-btn:hover{border-color:var(--bio2);color:var(--bio)}.filter-btn.active{background:var(--bio3);border-color:var(--bio2);color:var(--bio)}
+  .routes-grid{display:flex;flex-direction:column;gap:1rem}
+  .route-card{border:1px solid;overflow:hidden;animation:card-in 0.3s ease}
+  .route-card-top{display:grid;grid-template-columns:auto 1fr;gap:1.1rem;padding:1.1rem;align-items:start}
+  .route-icon-col{display:flex;flex-direction:column;align-items:center;gap:6px;flex-shrink:0;width:64px}
+  .route-icon{font-size:22px}
+  .route-status-badge{font-size:7px;letter-spacing:0.10em;text-transform:uppercase;padding:3px 7px;border:1px solid;text-align:center;width:100%;word-break:break-word;line-height:1.3}
+  .route-header-row{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:6px;flex-wrap:wrap}
+  .route-name{font-family:var(--serif);font-size:20px;font-weight:400;color:var(--foam);flex:1;min-width:0}
+  .route-delay-box{text-align:right;flex-shrink:0}
+  .route-delay-val{font-family:var(--serif);font-size:16px;font-weight:300}
+  .route-delay-lbl{font-size:7px;letter-spacing:0.16em;text-transform:uppercase;color:var(--foam3)}
+  .route-meta{display:flex;flex-wrap:wrap;gap:6px 18px;margin-bottom:8px}
+  .route-meta-item{font-size:9px;color:var(--foam2)}
+  .route-meta-label{color:var(--bio2);margin-right:3px;font-size:7.5px;letter-spacing:0.12em;text-transform:uppercase}
+  .route-desc{font-size:10.5px;color:var(--foam2);line-height:1.65;opacity:0.85}
+  .route-card-bottom{padding:0.7rem 1.1rem;border-top:1px solid var(--rule);background:rgba(0,0,0,0.15)}
+  .route-affected-label{font-size:7.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--bio2);margin-bottom:5px}
+  .route-affected-list{display:flex;gap:5px;flex-wrap:wrap}
+  .affected-tag{font-size:8.5px;padding:2px 7px;border:1px solid var(--rule);color:var(--foam2);cursor:pointer;transition:all 0.12s}
+  .affected-tag:hover{border-color:var(--bio2);color:var(--bio);background:rgba(0,212,255,0.06)}
+  .route-alt-section{padding:0.7rem 1.1rem;border-top:1px solid var(--rule);background:rgba(0,212,255,0.02)}
+  .route-alt-label{font-size:7.5px;letter-spacing:0.18em;text-transform:uppercase;color:var(--foam3);margin-bottom:4px}
+  .route-alt-item{font-size:9.5px;color:var(--foam2);margin-bottom:3px;padding-left:11px;position:relative}
+  .route-alt-item::before{content:'→';position:absolute;left:0;color:var(--bio3)}
+
+  .footer-outer{border-top:1px solid var(--rule2);margin-top:4rem;background:rgba(2,13,24,0.8)}
+  .footer{max-width:1200px;margin:0 auto;padding:2.5rem 2rem;display:grid;grid-template-columns:1fr 1fr;gap:3rem}
+  .footer-brand{font-family:var(--serif);font-size:13px;letter-spacing:0.14em;text-transform:uppercase;color:var(--foam2);margin-bottom:0.8rem}
+  .footer-desc{font-size:9px;color:var(--bio3);line-height:1.75;max-width:300px}
+  .footer-src-title{font-size:7.5px;letter-spacing:0.28em;text-transform:uppercase;color:var(--bio);margin-bottom:0.9rem}
+  .footer-src{margin-bottom:8px}.footer-src-name{font-size:9px;color:var(--foam2)}.footer-src-detail{font-size:8px;color:var(--bio3)}
+  .footer-bar{max-width:1200px;margin:0 auto;padding:0 2rem 2rem;display:flex;justify-content:space-between;font-size:8px;color:var(--bio3);letter-spacing:0.08em;flex-wrap:wrap;gap:0.5rem}
+
+  ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--rule2);border-radius:3px}
+
+  @media(max-width:900px){
+    .masthead,.cols{grid-template-columns:1fr}
+    .stab-box{text-align:left;border-top:1px solid var(--rule);padding-top:1.25rem}
+    .depth-inner{grid-template-columns:1fr 1fr}
+    .depth-stat:nth-child(2){border-right:none}
+    .footer{grid-template-columns:1fr}
+    .prices-cols{flex-wrap:wrap}
+    .price-col{min-width:140px}
+  }
+  @media(max-width:680px){
+    .nav-inner{padding:0 1rem}
+    .brand-name{font-size:18px;letter-spacing:0.16em}
+    .tab{padding:8px 9px;font-size:7.5px;letter-spacing:0.12em}
+    .lang-btn{padding:4px 6px;font-size:7.5px}
+    .nav-loc{display:none}
+    .page{padding:2rem 1rem 3rem}
+    .depth-inner{padding:0 1rem}
+  }
+`;
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [lang, setLang]            = useState('en');
+  const t = T[lang];
+  const events = EVENTS[lang];
+  const routes = ROUTES[lang];
+  const commText = COMMODITY_TEXT[lang];
+  const statExplain = STAT_EXPLAIN[lang];
+
+  const [showFishing, setShowFishing] = useState(false);
+  const [location, setLocation]    = useState('Red Sea Corridor');
+  const [seaData, setSeaData]      = useState(REGIONS['Red Sea Corridor']);
+  const [tab, setTab]              = useState('dashboard');
+  const [alertOpen, setAlertOpen]  = useState(true);
+  const [routeFilter, setRouteFilter] = useState('all');
+
+  const [regionQ, setRegionQ]      = useState('');
+  const [showRDrop, setShowRDrop]  = useState(false);
+  const [regionHi, setRegionHi]    = useState(-1);
+  const regionInputRef             = useRef(null);
+  const regionDropRef              = useRef(null);
+
+  const [query, setQuery]          = useState('');
+  const [showSug, setShowSug]      = useState(false);
+  const [hiIdx, setHiIdx]          = useState(-1);
+  const [commodity, setCommodity]  = useState(null);
+  const [forecast, setForecast]    = useState(null);
+  const [loading, setLoading]      = useState(false);
+  const [error, setError]          = useState(null);
+  const [notFound, setNotFound]    = useState(null);
+  const inputRef                   = useRef(null);
+  const sugRef                     = useRef(null);
+
+  const [noiseOffset, setNoiseOffset] = useState(0);
+  const [livePrice, setLivePrice]     = useState(null);
+  const [prevPrice, setPrevPrice]     = useState(null);
+  const [flashClass, setFlashClass]   = useState('');
+
+  useEffect(() => { document.body.className = lang==='zh' ? 'zh' : ''; }, [lang]);
+
+  useEffect(() => {
+    const id = setInterval(() => setSeaData(p=>({...p,stability:Math.max(0.1,Math.min(1,p.stability+(Math.random()-0.5)*0.02))})), 4000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (!commodity) return;
+    const id = setInterval(() => setNoiseOffset((Math.random()-0.48)*20), 3000);
+    return () => clearInterval(id);
+  }, [commodity]);
+
+  useEffect(() => {
+    if (!commodity) return;
+    const r = calcPrice(commodity, seaData, noiseOffset);
+    setPrevPrice(livePrice); setLivePrice(r.currentPrice);
+  }, [noiseOffset, seaData, commodity]); // eslint-disable-line
+
+  useEffect(() => {
+    if (prevPrice===null || livePrice===null) return;
+    setFlashClass(livePrice > prevPrice ? 'flash-up' : 'flash-dn');
+    const id = setTimeout(() => setFlashClass(''), 500);
+    return () => clearTimeout(id);
+  }, [livePrice]); // eslint-disable-line
+
+  useEffect(() => {
+    if (!commodity) return;
+    setForecast(calcForecast(commodity, seaData));
+  }, [seaData, commodity]); // eslint-disable-line
+
+  useEffect(() => {
+    const h = (e) => {
+      if (regionDropRef.current && !regionDropRef.current.contains(e.target) && regionInputRef.current && !regionInputRef.current.contains(e.target)) setShowRDrop(false);
+      if (sugRef.current && !sugRef.current.contains(e.target) && inputRef.current && !inputRef.current.contains(e.target)) setShowSug(false);
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  // Re-apply localised text when language changes
+  useEffect(() => {
+    if (!commodity || commodity.tags?.includes('custom')) return;
+    const txt = commText[commodity.id] || commText[commodity.id?.replace(/_oil$/,'_oil')];
+    if (txt) setCommodity(prev => ({...prev, supplyRoute:txt.supplyRoute, context:txt.context}));
+  }, [lang]); // eslint-disable-line
+
+  const stab = seaData.stability;
+  const stabClass = stab<0.5?'crit':stab<0.8?'vol':'ok';
+  const stabLabel = stab<0.5?t.critical:stab<0.8?t.volatile:t.stable;
+  const stabColor = (s) => s>=0.8?'var(--teal)':s>=0.5?'var(--amber)':'var(--dn)';
+
+  const regionSugs = useMemo(() => {
+    const q = regionQ.trim().toLowerCase();
+    return REGION_NAMES.filter(n => !q || n.toLowerCase().includes(q));
+  }, [regionQ]);
+
+  const suggestions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return COMMODITIES;
+    return COMMODITIES.filter(c => c.name.toLowerCase().includes(q) || c.tags.some(tg=>tg.includes(q)) || c.id.includes(q));
+  }, [query]);
+
+  useEffect(() => setHiIdx(-1), [suggestions]);
+  useEffect(() => setRegionHi(-1), [regionSugs]);
+
+  const selectRegion = (name) => {
+    setLocation(name); setSeaData(REGIONS[name]);
+    setRegionQ(''); setShowRDrop(false);
+    if (commodity) {
+      const r = calcPrice(commodity, REGIONS[name]);
+      setLivePrice(r.currentPrice);
+      setForecast(calcForecast(commodity, REGIONS[name]));
+    }
+  };
+
+  const applyCommodity = (comm, sea) => {
+    setCommodity(comm);
+    const r = calcPrice(comm, sea);
+    setLivePrice(r.currentPrice); setPrevPrice(null);
+    setNotFound(null); setError(null);
+    setForecast(calcForecast(comm, sea));
+  };
+
+  const runLookup = useCallback(async (q) => {
+    if (!q?.trim()) return;
+    setLoading(true); setCommodity(null); setError(null); setNotFound(null); setLivePrice(null); setForecast(null); setShowSug(false);
+    const known = COMMODITIES.find(c => c.name.toLowerCase()===q.toLowerCase() || c.name.toLowerCase().includes(q.toLowerCase()) || c.id===q.toLowerCase().replace(/ /g,'_'));
+    if (known) {
+      const txt = commText[known.id] || { supplyRoute:'', context:'' };
+      applyCommodity({...known, supplyRoute:txt.supplyRoute, context:txt.context}, seaData);
+      setLoading(false); return;
+    }
+    try {
+      const r = await lookupCustomItem(q, seaData, location);
+      if (r.notCommodity) {
+        const words = q.toLowerCase().split(' ');
+        const sug = COMMODITIES.find(c => words.some(w=>w.length>3&&(c.name.toLowerCase().includes(w)||c.tags.some(tg=>tg.includes(w)))));
+        setNotFound({ name:q, suggestion:sug||null });
+      } else {
+        const comm = { id:q.toLowerCase().replace(/ /g,'_'), name:r.name||q, icon:r.icon||'📦', tags:['custom'], unit:r.unit||'unit', basePrice:r.basePrice||10, sensitivity:r.sensitivity||0.5, routes:r.routes||[], origins:r.origins||[], supplyRoute:r.supplyRoute||'', context:r.context||'' };
+        applyCommodity(comm, seaData);
+      }
+    } catch { setError(t.depthReadFailed); }
+    finally { setLoading(false); }
+  }, [seaData, location, commText, t]); // eslint-disable-line
+
+  const handleSubmit = (e) => { e.preventDefault(); runLookup(hiIdx>=0&&suggestions[hiIdx]?suggestions[hiIdx].name:query); };
+  const handleKD = (e) => {
+    if (!showSug||!suggestions.length) return;
+    if (e.key==='ArrowDown'){e.preventDefault();setHiIdx(i=>Math.min(i+1,suggestions.length-1));}
+    if (e.key==='ArrowUp'){e.preventDefault();setHiIdx(i=>Math.max(i-1,-1));}
+    if (e.key==='Escape') setShowSug(false);
+  };
+  const handleRKD = (e) => {
+    if (!showRDrop||!regionSugs.length) return;
+    if (e.key==='ArrowDown'){e.preventDefault();setRegionHi(i=>Math.min(i+1,regionSugs.length-1));}
+    if (e.key==='ArrowUp'){e.preventDefault();setRegionHi(i=>Math.max(i-1,-1));}
+    if (e.key==='Enter'){e.preventDefault();if(regionHi>=0)selectRegion(regionSugs[regionHi]);}
+    if (e.key==='Escape') setShowRDrop(false);
+  };
+
+  const getImpact = () => {
+    const i = {
+      en:{ tradeOk:'Routes operating normally.', tradeSwell:'High swells causing shipping delays.', tradeGeo:'Geopolitical factors forcing route rerouting.', secOk:'Standard monitoring in place.', secHigh:'High Alert: Active conflict or port closures nearby.', secCaution:'Caution: Elevated regional tensions reported.', ecoOk:'Ecosystem stable.', ecoWarm:'Warmer waters may shift fish migration patterns.' },
+      es:{ tradeOk:'Rutas operando con normalidad.', tradeSwell:'Oleaje elevado causa retrasos en el transporte.', tradeGeo:'Factores geopolíticos fuerzan el desvío de rutas.', secOk:'Vigilancia estándar en curso.', secHigh:'Alerta máxima: conflicto activo o puertos cerrados.', secCaution:'Precaución: Tensiones regionales elevadas.', ecoOk:'Ecosistema estable.', ecoWarm:'Aguas más cálidas pueden alterar la migración marina.' },
+      zh:{ tradeOk:'航线运营正常。', tradeSwell:'大浪导致航运延误。', tradeGeo:'地缘政治因素迫使航线改道。', secOk:'标准监控中。', secHigh:'高度警戒：附近有活跃冲突或港口封闭。', secCaution:'注意：地区紧张局势升级。', ecoOk:'生态系统稳定。', ecoWarm:'水温升高可能改变鱼群洄游路线。' },
+    }[lang];
+    return {
+      trade: seaData.waves>3.5 ? i.tradeSwell : stab<0.7 ? i.tradeGeo : i.tradeOk,
+      security: stab<0.5 ? i.secHigh : stab<0.8 ? i.secCaution : i.secOk,
+      eco: seaData.anomaly>0.5 ? i.ecoWarm : i.ecoOk,
+    };
+  };
+  const impact = getImpact();
+
+  const evType = (type) => ({geopolitical:{en:'geopolitical',es:'geopolítico',zh:'地缘政治'},climate:{en:'climate',es:'climático',zh:'气候'},logistics:{en:'logistics',es:'logístico',zh:'物流'}}[type]?.[lang]||type);
+  const evImpact = (imp) => ({Critical:{en:'Critical',es:'Crítico',zh:'危急'},High:{en:'High',es:'Alto',zh:'高'},Medium:{en:'Medium',es:'Medio',zh:'中'}}[imp]?.[lang]||imp);
+  const routeStatusLabel = (s) => ({critical:{en:'🔴 Disrupted',es:'🔴 Interrumpida',zh:'🔴 中断'},reduced:{en:'🟡 Restricted',es:'🟡 Restringida',zh:'🟡 受限'},elevated:{en:'🟠 Elevated Risk',es:'🟠 Riesgo Elevado',zh:'🟠 风险升高'},congested:{en:'🟠 Congested',es:'🟠 Congestionada',zh:'🟠 拥堵'},normal:{en:'🟢 Operational',es:'🟢 Operacional',zh:'🟢 正常运营'},seasonal:{en:'🔵 Seasonal',es:'🔵 Estacional',zh:'🔵 季节性'}}[s]?.[lang]||s);
+
+  const isUp = livePrice!==null && commodity ? livePrice>=commodity.basePrice : false;
+  const priceColor = isUp ? 'var(--up)' : 'var(--dn)';
+  const shiftPct = commodity && livePrice ? ((livePrice-commodity.basePrice)/commodity.basePrice*100) : 0;
+  const fmtP = (v) => { if (!v||!commodity) return ''; if (commodity.basePrice>=100) return '$'+v.toFixed(0); if (commodity.basePrice<1) return '$'+v.toFixed(4); return '$'+v.toFixed(2); };
+  const predColor = (pred) => { if (!livePrice||!pred) return 'var(--foam2)'; return pred>=livePrice?'var(--up)':'var(--dn)'; };
+  const filteredRoutes = routeFilter==='all' ? routes : routes.filter(r=>r.status===routeFilter);
+
+  return (
+    <>
+      <style>{css}</style>
+      <MarineLayer/>
+
+      {showFishing && <FishingGame onClose={() => setShowFishing(false)}/>}
+
+      <nav className="nav">
+        <div className="nav-inner">
+          <div className="brand" onClick={() => setShowFishing(true)} title="Click to fish the markets!">
+            <div className="brand-icon"><Ship size={20} color="#00d4ff"/></div>
+            <div className="brand-name">The <span>Current</span></div>
+          </div>
+          <div className="nav-center">
+            <button className={`tab ${tab==='dashboard'?'on':''}`} onClick={()=>setTab('dashboard')}>{t.tabPulse}</button>
+            <button className={`tab ${tab==='wallet'?'on':''}`} onClick={()=>setTab('wallet')}>{t.tabPrices}</button>
+            <button className={`tab ${tab==='routes'?'on':''}`} onClick={()=>setTab('routes')}>{t.tabRoutes}</button>
+          </div>
+          <div className="nav-right">
+            <div className="lang-switcher">
+              {['en','es','zh'].map(l=>(
+                <button key={l} className={`lang-btn${lang===l?' active':''}`} onClick={()=>setLang(l)}>
+                  {l==='en'?'EN':l==='es'?'ES':'中文'}
+                </button>
+              ))}
+            </div>
+            <div className="nav-loc"><MapPin size={10} color="#00d4ff"/>{location}</div>
+          </div>
+        </div>
+      </nav>
+
+      {tab==='dashboard'&&(
+        <>
+          <div className="page">
+            <div className="masthead">
+              <div>
+                <div className="kicker">{t.kickerDash}</div>
+                <h1 className="headline"><span style={{color:'var(--foam2)'}}>{location}</span><br/><em>{t.stabilityReport}</em></h1>
+              </div>
+              <div className="stab-box">
+                <div className={`stab-num ${stabClass}`}>{Math.round(stab*100)}<span style={{fontSize:24,color:'var(--foam2)'}}>%</span></div>
+                <div className="stab-lbl">{t.stabilityIndex}</div>
+                <div className={`stab-tag ${stabClass}`}>{stabLabel}</div>
+              </div>
+            </div>
+          </div>
+
+          <WaveDivider/>
+          <div className="depth-band">
+            <div className="depth-inner">
+              {[
+                {icon:<Thermometer size={13}/>,lbl:t.surfaceTemp, val:seaData.sst.toFixed(1),   unit:'°C',  sub:t.observed,                                                             tipKey:'surfaceTemp'},
+                {icon:<Waves       size={13}/>,lbl:t.waveHeight,  val:seaData.waves.toFixed(1), unit:'m',   sub:t.significant,                                                         tipKey:'waveHeight'},
+                {icon:<Activity    size={13}/>,lbl:t.climateDelta,val:(seaData.anomaly>0?'+':'')+seaData.anomaly.toFixed(2),unit:'°',sub:seaData.anomaly>0?t.aboveBaseline:t.belowBaseline,tipKey:'climateDelta'},
+                {icon:<Wind        size={13}/>,lbl:t.windSpeed,   val:seaData.wind.toFixed(0),   unit:'kts', sub:t.surface,                                                             tipKey:'windSpeed'},
+              ].map((s,i)=>(
+                <StatCell key={i} icon={s.icon} lbl={s.lbl} val={s.val} unit={s.unit} sub={s.sub} explain={statExplain[s.tipKey]}/>
+              ))}
+            </div>
+          </div>
+          <WaveDivider flip/>
+
+          <div className="page" style={{paddingTop:'2rem'}}>
+            {alertOpen&&stab<0.5&&(
+              <div className="alert">
+                <ShieldAlert size={14} color="var(--dn)" style={{marginTop:2,flexShrink:0}}/>
+                <div>
+                  <div className="alert-title">{t.securityAdvisory}</div>
+                  <div className="alert-body">{t.alertBody(location,Math.round((1-stab)*30))}</div>
+                </div>
+                <button className="alert-close" onClick={()=>setAlertOpen(false)}>×</button>
+              </div>
+            )}
+
+            <div className="region-wrap">
+              <div className="region-form">
+                <span className="region-label"><Anchor size={11}/>{t.searchRegion}</span>
+                <input ref={regionInputRef} type="text" placeholder={t.filterRegion}
+                  value={regionQ} onChange={e=>{setRegionQ(e.target.value);setShowRDrop(true);}}
+                  onFocus={()=>setShowRDrop(true)} onKeyDown={handleRKD} autoComplete="off"/>
+                {regionQ&&<button type="button" className="region-clear" onClick={()=>{setRegionQ('');regionInputRef.current?.focus();}}><X size={12}/></button>}
+                <button className="region-btn" onClick={()=>{if(regionSugs.length>0)selectRegion(regionHi>=0?regionSugs[regionHi]:regionSugs[0]);}}>{t.selectBtn}</button>
+              </div>
+              {showRDrop&&regionSugs.length>0&&(
+                <div className="region-dropdown" ref={regionDropRef}>
+                  {regionSugs.map((name,i)=>{
+                    const r=REGIONS[name];
+                    const sl=r.stability>=0.8?t.stable:r.stability>=0.5?t.volatile:t.critical;
+                    return(
+                      <div key={name} className={`region-option${i===regionHi?' hi':''}`} onMouseDown={()=>selectRegion(name)}>
+                        <span className="region-opt-name">{name}</span>
+                        <span className="region-opt-stab" style={{color:stabColor(r.stability)}}>{sl} · {Math.round(r.stability*100)}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="cols">
+              <div>
+                <div className="sh"><span className="sh-lbl">{t.worldEvents}</span><div className="sh-rule"/></div>
+                {events.map((ev,i)=>(
+                  <div className="event" key={ev.id}>
+                    <div className="ev-num">{String(i+1).padStart(2,'0')}</div>
+                    <div>
+                      <div className="ev-meta">
+                        <span className="ev-type">{evType(ev.type)}</span>
+                        <span style={{color:'var(--rule2)',fontSize:10}}>·</span>
+                        <span className="ev-loc">{ev.location}</span>
+                      </div>
+                      <div className="ev-title">{ev.title}</div>
+                      <div className="ev-desc">{ev.description}</div>
+                    </div>
+                    <div className={`badge ${ev.impact==='Critical'?'crit':ev.impact==='High'?'high':'med'}`}>{evImpact(ev.impact)}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="sidebar">
+                <div>
+                  <div className="sh"><span className="sh-lbl">{t.routeViability}</span><div className="sh-rule"/></div>
+                  <div className="panel">
+                    <div className="panel-head"><span className="panel-title">{t.activeCorridor}</span><Anchor size={12} color="var(--bio3)"/></div>
+                    <div className="panel-row"><span className="panel-lbl">{t.capeDiversion}</span><span className="panel-val val-dn">{t.capeVal}</span></div>
+                    <div className="panel-row"><span className="panel-lbl">{t.panamaLimits}</span><span className="panel-val val-amber">{t.panamaVal}</span></div>
+                    <div className="panel-row"><span className="panel-lbl">{t.arcticNSR}</span><span className="panel-val val-teal">{t.arcticVal}</span></div>
+                    <button className="panel-cta" onClick={()=>setTab('wallet')}>{t.checkPriceBtn}</button>
+                  </div>
+                </div>
+                <div>
+                  <div className="sh"><span className="sh-lbl">{t.integratedRisk}</span><div className="sh-rule"/></div>
+                  <div className="panel">
+                    <div className="risk-block"><div className="risk-lbl">{t.tradeFlow}</div><div className="risk-txt">{impact.trade}</div></div>
+                    <div className="risk-block"><div className="risk-lbl">{t.globalSec}</div><div className="risk-txt">{impact.security}</div></div>
+                    <div className="risk-block"><div className="risk-lbl">{t.ecosystem}</div><div className="risk-txt">{impact.eco}</div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {tab==='wallet'&&(
+        <div className="page">
+          <div className="masthead" style={{gridTemplateColumns:'1fr',gap:'0.5rem',marginBottom:'2rem'}}>
+            <div className="kicker">{t.kickerWallet} · {location}</div>
+            <h1 className="headline" style={{fontSize:'clamp(32px,4vw,48px)'}}>{t.walletTitle} <em>{t.walletTitleEm}</em></h1>
+          </div>
+          <div className="sh"><span className="sh-lbl">{t.lookupSh}</span><div className="sh-rule"/></div>
+          <div className="ocean-badge"><div className="pulse-dot"/>{t.badgeTxt(COMMODITIES.length)}</div>
+          <div className="search-wrap" style={{marginBottom:'1.25rem'}}>
+            <form className="search-row" onSubmit={handleSubmit}>
+              <input ref={inputRef} type="text" placeholder={t.searchPlaceholder(COMMODITIES.length)}
+                value={query} onChange={e=>{setQuery(e.target.value);setShowSug(true);}}
+                onFocus={()=>setShowSug(true)} onKeyDown={handleKD} autoComplete="off"/>
+              {query&&<button type="button" className="search-clear" onClick={()=>{setQuery('');setCommodity(null);setError(null);setNotFound(null);setLivePrice(null);setForecast(null);inputRef.current?.focus();}}><X size={13}/></button>}
+              <button type="submit" className="search-go" disabled={loading}>
+                {loading?<div style={{width:7,height:7,borderRadius:'50%',background:'var(--bio)',boxShadow:'0 0 6px var(--bio)'}}/>:<><Search size={13}/>{t.searchLabel}</>}
+              </button>
+            </form>
+            {showSug&&suggestions.length>0&&(
+              <div className="suggestions" ref={sugRef}>
+                {suggestions.slice(0,12).map((c,i)=>(
+                  <div key={c.id} className={`suggestion${i===hiIdx?' hi':''}`} onMouseDown={()=>{setQuery(c.name);setShowSug(false);runLookup(c.name);}}>
+                    <span className="sug-icon">{c.icon}</span>
+                    <div><div className="sug-name">{c.name}</div><div className="sug-tags">{c.tags.join(' · ')}</div></div>
+                  </div>
+                ))}
+                {suggestions.length>12&&<div style={{padding:'7px 13px',fontSize:8.5,color:'var(--foam3)',textAlign:'center',letterSpacing:'0.10em',textTransform:'uppercase'}}>{t.moreSuggestions(suggestions.length-12)}</div>}
+              </div>
+            )}
+          </div>
+          {loading&&(<div className="sonar-wrap"><div className="sonar"><div className="sonar-ring"/><div className="sonar-ring"/><div className="sonar-ring"/><div className="sonar-center"/></div><div className="sonar-txt">{t.scanning}</div></div>)}
+          {notFound&&!loading&&(
+            <div className="unknown-card">
+              <div className="unknown-card-title"><AlertCircle size={16} color="var(--bio)"/>{t.notFoundTitle(notFound.name)}</div>
+              <div className="unknown-card-body">{t.notFoundBody}</div>
+              <div className="unknown-card-hint">
+                {t.notFoundHint(notFound.suggestion)}
+                {notFound.suggestion&&<span style={{color:'var(--bio)',cursor:'pointer',textDecoration:'underline'}} onClick={()=>{setQuery(notFound.suggestion.name);runLookup(notFound.suggestion.name);setNotFound(null);}}>{notFound.suggestion.name}</span>}
+              </div>
+            </div>
+          )}
+          {error&&!loading&&(<div className="err-card"><AlertCircle size={13} color="var(--dn)" style={{flexShrink:0,marginTop:1}}/><div>{error}</div></div>)}
+          {commodity&&livePrice!==null&&!loading&&(
+            <div className="result-card">
+              <div className="price-header">
+                <div className="price-top-row">
+                  <div className="price-meta">
+                    <div className="price-name">{commodity.icon} {commodity.name}</div>
+                    <div className="price-base">{t.usBaseline}: {fmtP(commodity.basePrice)} / {commodity.unit}</div>
+                  </div>
+                </div>
+                <div className="prices-cols">
+                  <div className="price-col">
+                    <div className="price-col-label" style={{color:'var(--bio)'}}><div className="live-dot"/>{t.livePrice}</div>
+                    <div className={`price-big ${flashClass}`} style={{color:priceColor}}>{fmtP(livePrice)}</div>
+                    <div className="price-shift" style={{color:priceColor}}>
+                      {isUp?<TrendingUp size={11}/>:<TrendingDown size={11}/>}
+                      {isUp?'+':''}{shiftPct.toFixed(2)}% {t.vsBaseline}
+                    </div>
+                  </div>
+                  {forecast&&(
+                    <div className="price-col">
+                      <div className="predicted-label"><span style={{fontSize:10,opacity:0.7}}>◈</span>{t.predictedPrice}</div>
+                      <div className="predicted-big" style={{color:predColor(forecast.sixMonth)}}>{fmtP(forecast.sixMonth)}</div>
+                      <div className="predicted-sub">{t.predictedSub}</div>
+                      <div className="pred-range">{t.threeMonth}: {fmtP(forecast.threeMonth)}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="result-notes">
+                <div><span className="note-lbl">{t.supplyChain}</span><div className="note-txt">{commodity.supplyRoute}</div></div>
+                <div><span className="note-lbl">{t.usMarket}</span><div className="note-txt">{commodity.context}</div></div>
+              </div>
+              {commodity.origins?.length>0&&(<div className="origin-row"><span className="origin-lbl">{t.origins}</span>{commodity.origins.map(o=><span key={o} className="origin-tag">{o}</span>)}</div>)}
+              {commodity.routes?.length>0&&(<div className="origin-row"><span className="origin-lbl">{t.keyRoutes}</span>{commodity.routes.map(r=><span key={r} className="origin-tag" style={{cursor:'pointer'}} onClick={()=>setTab('routes')}>{r}</span>)}</div>)}
+              <div className="sens-row">
+                <span className="sens-lbl">{t.maritimeSens}</span>
+                <div className="sens-track"><div className="sens-fill" style={{width:`${(commodity.sensitivity||0)*100}%`}}/></div>
+                <span className="sens-pct">{Math.round((commodity.sensitivity||0)*100)}%</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab==='routes'&&(
+        <div className="page">
+          <div className="masthead" style={{gridTemplateColumns:'1fr',gap:'0.5rem',marginBottom:'2rem'}}>
+            <div className="kicker">{t.routeGlobalKicker}</div>
+            <h1 className="headline" style={{fontSize:'clamp(32px,4vw,48px)'}}><em>{t.routeTitle}</em></h1>
+          </div>
+          <div className="sh"><span className="sh-lbl">{t.routeStatusFilter}</span><div className="sh-rule"/></div>
+          <div className="routes-filter">
+            {[{key:'all',lbl:t.allRoutes},{key:'critical',lbl:t.disrupted},{key:'reduced',lbl:t.restricted},{key:'elevated',lbl:t.elevatedRisk},{key:'congested',lbl:t.congested},{key:'normal',lbl:t.operational}].map(f=>(
+              <button key={f.key} className={`filter-btn${routeFilter===f.key?' active':''}`} onClick={()=>setRouteFilter(f.key)}>{f.lbl}</button>
+            ))}
+          </div>
+          <div className="routes-grid">
+            {filteredRoutes.map(route=>{
+              const sc=ROUTE_STATUS_COLORS[route.status]||ROUTE_STATUS_COLORS.normal;
+              const affComms=COMMODITIES.filter(c=>route.affected.includes(c.id));
+              return(
+                <div key={route.id} className="route-card" style={{borderColor:sc.border,background:sc.bg}}>
+                  <div className="route-card-top">
+                    <div className="route-icon-col">
+                      <div className="route-icon">{route.icon}</div>
+                      <div className="route-status-badge" style={{borderColor:sc.border,color:sc.color}}>{routeStatusLabel(route.status)}</div>
+                    </div>
+                    <div>
+                      <div className="route-header-row">
+                        <div className="route-name">{route.name}</div>
+                        <div className="route-delay-box">
+                          <div className="route-delay-val" style={{color:sc.color}}>{route.delay}</div>
+                          <div className="route-delay-lbl">{t.impact}</div>
+                        </div>
+                      </div>
+                      <div className="route-meta">
+                        <div className="route-meta-item"><span className="route-meta-label">{t.transit}</span>{route.transit}</div>
+                        <div className="route-meta-item"><span className="route-meta-label">{t.volume}</span>{route.throughput}</div>
+                        <div className="route-meta-item"><span className="route-meta-label">{t.region}</span>{route.region}</div>
+                      </div>
+                      <div className="route-desc">{route.description}</div>
+                    </div>
+                  </div>
+                  {affComms.length>0&&(
+                    <div className="route-card-bottom">
+                      <div className="route-affected-label">{t.affectedComm}</div>
+                      <div className="route-affected-list">
+                        {affComms.map(c=><span key={c.id} className="affected-tag" onClick={()=>{setQuery(c.name);setTab('wallet');runLookup(c.name);}}>{c.icon} {c.name}</span>)}
+                      </div>
+                    </div>
+                  )}
+                  {route.alternatives?.length>0&&(
+                    <div className="route-alt-section">
+                      <div className="route-alt-label">{t.altRouting}</div>
+                      {route.alternatives.map((alt,i)=><div key={i} className="route-alt-item">{alt}</div>)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="footer-outer">
+        <div className="footer">
+          <div>
+            <div className="footer-brand">{t.footerBrand}</div>
+            <div className="footer-desc">{t.footerDesc(COMMODITIES.length)}</div>
+          </div>
+          <div>
+            <div className="footer-src-title">{t.footerSrcTitle}</div>
+            {[['NOAA Coral Reef Watch','Daily Global 5km SST Anomaly (v3.1)'],['Council on Foreign Relations','Global Conflict Tracker & Maritime Security'],['Copernicus Marine Service','Global Ocean Waves Analysis (WAM Model)'],['IMF & World Bank','Commodity Sensitivity & Logistics Indexing'],['UNCTAD','Review of Maritime Transport & Port Reliability']].map(([n,d])=>(
+              <div className="footer-src" key={n}><div className="footer-src-name">{n}</div><div className="footer-src-detail">{d}</div></div>
+            ))}
+          </div>
+        </div>
+        <div className="footer-bar"><span>© 2026 The Current Logistics Protocols</span><span>{t.footerBar(COMMODITIES.length)}</span></div>
+      </div>
+    </>
+  );
+}
